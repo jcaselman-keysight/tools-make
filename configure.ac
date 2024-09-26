@@ -21,8 +21,9 @@
 #   51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
 
 AC_INIT
-AC_PREREQ(2.57)
+AC_PREREQ([2.71])
 AC_CONFIG_SRCDIR([application.make])
+AC_CONFIG_MACRO_DIRS([m4])
 
 #
 # TODO: This configure file should not contain any checks that depend on the
@@ -44,58 +45,11 @@ targetArgument=${target}
 AC_CANONICAL_TARGET([])
 
 AC_PATH_PROG(GNUSTEP_HAS_PKGCONFIG, pkgconfig, yes, no)
-
+AC_CHECK_PROG([HAVE_GNUSTEP_CONFIG], [gnustep-config], yes, no)
 #--------------------------------------------------------------------
 # Setup the library combination
 #--------------------------------------------------------------------
-
-AC_MSG_CHECKING(for library combo)
-AC_ARG_WITH(library-combo,[
---with-library-combo
-   Define the default "library combo".  The library combo is a string
-   of the form aaa-bbb-ccc where 'aaa' is the Objective-C runtime
-   library to use (examples are 'gnu' and 'apple'), 
-   'bbb' is the Foundation library to use (examples are 'gnu' for
-   gnustep-base, and 'apple' for Apple Cocoa FoundationKit),
-   and 'ccc' is the ApplicationKit to use (examples are 'gnu'
-   for gnustep-gui and 'apple' for Apple Cocoa AppKit).  Use this 
-   option if you want to force a different default library combo than 
-   the one that would be used by default.  For example, on Darwin GNUstep
-   will automatically use the Apple Objective-C frameworks by
-   default (library-combo=apple-apple-apple); if you are planning 
-   on installing and using gnustep-base on there, you would need 
-   to use --with-library-combo=gnu-gnu-gnu instead.  Please notice
-   that if --disable-flattened is used, gnustep-make can have fat
-   binaries that support multiple library combos.  In that case,
-   this flag will only configure the default one, but you can still
-   use other ones at run-time.
-   Please use 'ng-gnu-gnu' to build with 'next generation' cutting edge
-   runtime and compile time featured (requires a recent version of clang).
-],
-ac_cv_library_combo=$withval,
-ac_cv_library_combo=$ac_cv_library_combo
-)
-
-if test "$ac_cv_library_combo" = "" -o "$ac_cv_library_combo" = "no"; then
-  case "$host_os" in
-    darwin*)   ac_cv_library_combo=apple-apple-apple ;;
-    nextstep4) ac_cv_library_combo=nx-nx-nx          ;;
-    openstep4) ac_cv_library_combo=nx-nx-nx          ;;
-    *)         ac_cv_library_combo=gnu-gnu-gnu       ;;
-  esac
-fi
-
-case "$ac_cv_library_combo" in
-  apple) ac_cv_library_combo=apple-apple-apple ;;
-  gnu)   ac_cv_library_combo=gnu-gnu-gnu ;;
-  ng)    ac_cv_library_combo=ng-gnu-gnu ;;
-  nx)    ac_cv_library_combo=nx-nx-nx ;;
-esac
-
-AC_SUBST(ac_cv_library_combo)
-AC_MSG_RESULT($ac_cv_library_combo)
-
-OBJC_RUNTIME_LIB=`echo $ac_cv_library_combo | awk -F- '{print $1}'`
+GS_LIBRARY_COMBO()
 
 # The ng runtime library setting requires clang rather than gcc
 if test "$OBJC_RUNTIME_LIB" = "ng"; then
@@ -125,13 +79,20 @@ AC_PROG_CPP
 # compile/link C++ code. :-)
 AC_PROG_CXX
 
-# Similarly for the ObjC++ compiler ... but only new versions of autoconf
-# support it, so we pretend by using the C++ compiler
-#AC_PROG_OBJCXX
-OBJCXX="${CXX}"
+# Similarly for the ObjC++ compiler...
+AC_PROG_OBJCXX
 
 # We may use egrep for some tests further down below
 AC_PROG_EGREP
+
+# Search for a debugger. We try 'gdb' then 'lldb'.  If
+# we can't find it, we set it to 'gdb', even if that will fail later
+# on.
+AC_CHECK_PROGS(DEBUGGER, [gdb lldb], gdb)
+
+# Used by gnustep-config to output the debugger variable and
+# gnustep-tests.
+AC_SUBST(DEBUGGER)
 
 #--------------------------------------------------------------------
 # Check if we are using Apple cc
@@ -157,6 +118,20 @@ AC_SUBST(cc_cppprecomp)
 AC_SUBST(cc_bundle)
 
 #--------------------------------------------------------------------
+# config.guess returns mingw64 and pc as the os and vendor, but the
+# mingw-w64 project chose to use mingw32 and w64 respectively.  We
+#need to standardise on one.
+#--------------------------------------------------------------------
+if test "$host_os" = mingw64; then
+  host_os=mingw32
+  host_vendor=w64
+fi
+if test "$target_os" = mingw64; then
+  target_os=mingw32
+  target_vendor=w64
+fi
+
+#--------------------------------------------------------------------
 # specific target_os options
 #--------------------------------------------------------------------
 case "$target_os" in
@@ -172,25 +147,26 @@ esac
 #--------------------------------------------------------------------
 case $host_os in
   *cygwin*  )
-	MINGW32=no
-	MINGW64=no
-	CYGWIN=yes
-	MSWIND=yes;;
+    MINGW32=no
+    MINGW64=no
+    CYGWIN=yes
+    MSWIND=yes;;
   *mingw32* )
-	MINGW32=yes
-	MINGW64=no
-	CYGWIN=no
-	MSWIND=yes;;
-  *mingw64* )
-	MINGW32=no
-	MINGW64=yes
-	CYGWIN=no
-	MSWIND=yes;;
-          * )
-	MINGW32=no
-	MINGW64=no
-	CYGWIN=no
-	MSWIND=no;;
+    if test $host_vendor = pc
+    then
+      MINGW32=yes
+      MINGW64=no
+    else
+      MINGW32=no
+      MINGW64=yes
+    fi
+    CYGWIN=no
+    MSWIND=yes;;
+  * )
+    MINGW32=no
+    MINGW64=no
+    CYGWIN=no
+    MSWIND=no;;
 esac
 AC_SUBST(CYGWIN)
 
@@ -230,13 +206,15 @@ elif test "$CYGWIN" = yes; then
   export DLLTOOL=${DLLTOOL:-dlltool}
 fi
 
+GS_CHECK_CC_IS_CLANG()
+
 #--------------------------------------------------------------------
 # Find the binary and compile tools
 #--------------------------------------------------------------------
 if test "x$target" != "x$host"; then
   echo "cross compiling from $host to $target .."
   cross_compiling="yes"
-  if test "$OBJC_RUNTIME_LIB" = ng; then
+  if test "$OBJC_RUNTIME_LIB" = ng -o x"$gs_cv_cc_is_clang" = x"yes"; then
     AC_CHECK_PROG(CC,    "${targetArgument}-clang",   dnl
                          "${targetArgument}-clang",   clang)
   else
@@ -259,7 +237,7 @@ else
     CFLAGS="$CFLAGS -fblocks"
     AC_LANG_PUSH(C)
     AC_COMPILE_IFELSE([AC_LANG_PROGRAM([],[(void)^{int i; i = 0; }();])], [
-      ac64v_blocks="yes"
+      ac_cv_blocks="yes"
     ], [
       ac_cv_blocks="no"
     ])
@@ -272,6 +250,12 @@ else
   AC_CHECK_PROG(AR,      ar,      ar)
   AC_CHECK_PROG(DLLTOOL, dlltool, dlltool)
   AC_PROG_RANLIB
+fi
+
+# On Windows MSVC, AC_PROG_CC will not detect Clang in MSVC mode as a
+# GNU C compiler and therefore set CFLAGS to just "-g", so we fix it.
+if test "$target_os" = windows -a x"${GCC}" != x"yes" -a x"$gs_cv_cc_is_clang" = x"yes"; then
+  CFLAGS="-g -O2"
 fi
 
 AC_PROG_INSTALL
@@ -409,6 +393,15 @@ if test ! -f "$srcdir/FilesystemLayouts/$GNUSTEP_FILESYSTEM_LAYOUT_FILE" >&5 2>&
   exit 1
 fi
 
+AC_MSG_CHECKING([for architecture-specific lib path])
+AC_ARG_WITH(libdir,[
+--with-libdir=FILE
+   Set the variant of the /lib directory to use.  This is useful on systems which support
+   more than one binary format requiring separate libraries.  The default is lib.
+   Example: --with-libdir=lib64
+],
+  LIBDIR="$withval",LIBDIR="lib")
+
 # Need to do some checks related to building dylibs on darwin.
 GNUSTEP_ABSOLUTE_INSTALL_PATHS=;
 
@@ -525,38 +518,38 @@ AC_SUBST(GNUSTEP_PREFIX)
 # '/home' - we never install anything in there).
 GNUSTEP_MAKEFILES="$GNUSTEP_PREFIX$GNUSTEP_MAKEFILES"
 
-GNUSTEP_SYSTEM_APPS="$GNUSTEP_PREFIX$GNUSTEP_SYSTEM_APPS"
-GNUSTEP_SYSTEM_ADMIN_APPS="$GNUSTEP_PREFIX$GNUSTEP_SYSTEM_ADMIN_APPS"
-GNUSTEP_SYSTEM_WEB_APPS="$GNUSTEP_PREFIX$GNUSTEP_SYSTEM_WEB_APPS"
+GNUSTEP_SYSTEM_APPS=$(echo "$GNUSTEP_PREFIX$GNUSTEP_SYSTEM_APPS" | sed "s/@libdir@/$LIBDIR/g")
+GNUSTEP_SYSTEM_ADMIN_APPS=$(echo "$GNUSTEP_PREFIX$GNUSTEP_SYSTEM_ADMIN_APPS" | sed "s/@libdir@/$LIBDIR/g")
+GNUSTEP_SYSTEM_WEB_APPS=$(echo "$GNUSTEP_PREFIX$GNUSTEP_SYSTEM_WEB_APPS" | sed "s/@libdir@/$LIBDIR/g")
 GNUSTEP_SYSTEM_TOOLS="$GNUSTEP_PREFIX$GNUSTEP_SYSTEM_TOOLS"
 GNUSTEP_SYSTEM_ADMIN_TOOLS="$GNUSTEP_PREFIX$GNUSTEP_SYSTEM_ADMIN_TOOLS"
-GNUSTEP_SYSTEM_LIBRARY="$GNUSTEP_PREFIX$GNUSTEP_SYSTEM_LIBRARY"
+GNUSTEP_SYSTEM_LIBRARY=$(echo "$GNUSTEP_PREFIX$GNUSTEP_SYSTEM_LIBRARY" | sed "s/@libdir@/$LIBDIR/g")
 GNUSTEP_SYSTEM_HEADERS="$GNUSTEP_PREFIX$GNUSTEP_SYSTEM_HEADERS"
-GNUSTEP_SYSTEM_LIBRARIES="$GNUSTEP_PREFIX$GNUSTEP_SYSTEM_LIBRARIES"
+GNUSTEP_SYSTEM_LIBRARIES=$(echo "$GNUSTEP_PREFIX$GNUSTEP_SYSTEM_LIBRARIES" | sed "s/@libdir@/$LIBDIR/g")
 GNUSTEP_SYSTEM_DOC="$GNUSTEP_PREFIX$GNUSTEP_SYSTEM_DOC"
 GNUSTEP_SYSTEM_DOC_MAN="$GNUSTEP_PREFIX$GNUSTEP_SYSTEM_DOC_MAN"
 GNUSTEP_SYSTEM_DOC_INFO="$GNUSTEP_PREFIX$GNUSTEP_SYSTEM_DOC_INFO"
 
-GNUSTEP_NETWORK_APPS="$GNUSTEP_PREFIX$GNUSTEP_NETWORK_APPS"
-GNUSTEP_NETWORK_ADMIN_APPS="$GNUSTEP_PREFIX$GNUSTEP_NETWORK_ADMIN_APPS"
-GNUSTEP_NETWORK_WEB_APPS="$GNUSTEP_PREFIX$GNUSTEP_NETWORK_WEB_APPS"
+GNUSTEP_NETWORK_APPS=$(echo "$GNUSTEP_PREFIX$GNUSTEP_NETWORK_APPS" | sed "s/@libdir@/$LIBDIR/g")
+GNUSTEP_NETWORK_ADMIN_APPS=$(echo "$GNUSTEP_PREFIX$GNUSTEP_NETWORK_ADMIN_APPS" | sed "s/@libdir@/$LIBDIR/g")
+GNUSTEP_NETWORK_WEB_APPS=$(echo "$GNUSTEP_PREFIX$GNUSTEP_NETWORK_WEB_APPS" | sed "s/@libdir@/$LIBDIR/g")
 GNUSTEP_NETWORK_TOOLS="$GNUSTEP_PREFIX$GNUSTEP_NETWORK_TOOLS"
 GNUSTEP_NETWORK_ADMIN_TOOLS="$GNUSTEP_PREFIX$GNUSTEP_NETWORK_ADMIN_TOOLS"
-GNUSTEP_NETWORK_LIBRARY="$GNUSTEP_PREFIX$GNUSTEP_NETWORK_LIBRARY"
+GNUSTEP_NETWORK_LIBRARY=$(echo "$GNUSTEP_PREFIX$GNUSTEP_NETWORK_LIBRARY" | sed "s/@libdir@/$LIBDIR/g")
 GNUSTEP_NETWORK_HEADERS="$GNUSTEP_PREFIX$GNUSTEP_NETWORK_HEADERS"
-GNUSTEP_NETWORK_LIBRARIES="$GNUSTEP_PREFIX$GNUSTEP_NETWORK_LIBRARIES"
+GNUSTEP_NETWORK_LIBRARIES=$(echo "$GNUSTEP_PREFIX$GNUSTEP_NETWORK_LIBRARIES" | sed "s/@libdir@/$LIBDIR/g")
 GNUSTEP_NETWORK_DOC="$GNUSTEP_PREFIX$GNUSTEP_NETWORK_DOC"
 GNUSTEP_NETWORK_DOC_MAN="$GNUSTEP_PREFIX$GNUSTEP_NETWORK_DOC_MAN"
 GNUSTEP_NETWORK_DOC_INFO="$GNUSTEP_PREFIX$GNUSTEP_NETWORK_DOC_INFO"
 
-GNUSTEP_LOCAL_APPS="$GNUSTEP_PREFIX$GNUSTEP_LOCAL_APPS"
-GNUSTEP_LOCAL_ADMIN_APPS="$GNUSTEP_PREFIX$GNUSTEP_LOCAL_ADMIN_APPS"
-GNUSTEP_LOCAL_WEB_APPS="$GNUSTEP_PREFIX$GNUSTEP_LOCAL_WEB_APPS"
+GNUSTEP_LOCAL_APPS=$(echo "$GNUSTEP_PREFIX$GNUSTEP_LOCAL_APPS" | sed "s/@libdir@/$LIBDIR/g")
+GNUSTEP_LOCAL_ADMIN_APPS=$(echo "$GNUSTEP_PREFIX$GNUSTEP_LOCAL_ADMIN_APPS" | sed "s/@libdir@/$LIBDIR/g")
+GNUSTEP_LOCAL_WEB_APPS=$(echo "$GNUSTEP_PREFIX$GNUSTEP_LOCAL_WEB_APPS" | sed "s/@libdir@/$LIBDIR/g")
 GNUSTEP_LOCAL_TOOLS="$GNUSTEP_PREFIX$GNUSTEP_LOCAL_TOOLS"
 GNUSTEP_LOCAL_ADMIN_TOOLS="$GNUSTEP_PREFIX$GNUSTEP_LOCAL_ADMIN_TOOLS"
-GNUSTEP_LOCAL_LIBRARY="$GNUSTEP_PREFIX$GNUSTEP_LOCAL_LIBRARY"
+GNUSTEP_LOCAL_LIBRARY=$(echo "$GNUSTEP_PREFIX$GNUSTEP_LOCAL_LIBRARY" | sed "s/@libdir@/$LIBDIR/g")
 GNUSTEP_LOCAL_HEADERS="$GNUSTEP_PREFIX$GNUSTEP_LOCAL_HEADERS"
-GNUSTEP_LOCAL_LIBRARIES="$GNUSTEP_PREFIX$GNUSTEP_LOCAL_LIBRARIES"
+GNUSTEP_LOCAL_LIBRARIES=$(echo "$GNUSTEP_PREFIX$GNUSTEP_LOCAL_LIBRARIES" | sed "s/@libdir@/$LIBDIR/g")
 GNUSTEP_LOCAL_DOC="$GNUSTEP_PREFIX$GNUSTEP_LOCAL_DOC"
 GNUSTEP_LOCAL_DOC_MAN="$GNUSTEP_PREFIX$GNUSTEP_LOCAL_DOC_MAN"
 GNUSTEP_LOCAL_DOC_INFO="$GNUSTEP_PREFIX$GNUSTEP_LOCAL_DOC_INFO"
@@ -1083,96 +1076,6 @@ AC_SUBST(GNUSTEP_INSTALL_LD_SO_CONF)
 # gnustep-base since it concerns the runtime library (see explanations
 # at the beginning of this file).
 
-if test "$GNUSTEP_IS_FLATTENED" != yes; then
-  clean_target_os=`$srcdir/clean_os.sh $target_os`
-  clean_target_cpu=`$srcdir/clean_cpu.sh $target_cpu`
-  obj_dir="$clean_target_cpu/$clean_target_os"
-fi
-
-# Check to see if the libobjc library is in our GNUSTEP_SYSTEM_LIBRARIES
-# If so, there are probably other libraries that we want there also, so
-# leave the proper includes in CPPFLAGS and LDFLAGS
-AC_MSG_CHECKING(for custom shared objc library)
-AC_CACHE_VAL(gs_cv_objc_libdir,
-[dnl
-gs_cv_objc_libdir=NONE
-gs_cv_objc_incdir=NONE
-# Try GNUSTEP_SYSTEM_LIBRARIES first
-if test "$GNUSTEP_IS_FLATTENED" = yes; then
-  GNUSTEP_LDIR="$GNUSTEP_SYSTEM_LIBRARIES"
-  GNUSTEP_HDIR="$GNUSTEP_SYSTEM_HEADERS"
-else
-  GNUSTEP_LDIR="$GNUSTEP_SYSTEM_LIBRARIES/$obj_dir"
-  GNUSTEP_HDIR="$GNUSTEP_SYSTEM_HEADERS/$LIBRARY_COMBO"
-fi
-
-if test -f "$GNUSTEP_HDIR/objc/objc.h"; then
-  if test -f "$GNUSTEP_LDIR/libobjc.a" -o -f "$GNUSTEP_LDIR/libobjc.so" -o -f "$GNUSTEP_LDIR/libobjc.dll.a" -o -f "$GNUSTEP_LDIR/libobjc-gnu.dylib"; then
-    gs_cv_objc_libdir="$GNUSTEP_LDIR"
-    gs_cv_objc_incdir="$GNUSTEP_HDIR"
-    gs_cv_objc_tools="$GNUSTEP_SYSTEM_TOOLS"
-  fi
-fi
-
-# Try GNUSTEP_NETWORK_LIBRARIES second (override GNUSTEP_SYSTEM if
-# found)
-if test "$GNUSTEP_IS_FLATTENED" = yes; then
-  GNUSTEP_LDIR="$GNUSTEP_NETWORK_LIBRARIES"
-  GNUSTEP_HDIR="$GNUSTEP_NETWORK_HEADERS"
-else
-  GNUSTEP_LDIR="$GNUSTEP_NETWORK_LIBRARIES/$obj_dir"
-  GNUSTEP_HDIR="$GNUSTEP_NETWORK_HEADERS/$LIBRARY_COMBO"
-fi
-
-if test -f "$GNUSTEP_HDIR/objc/objc.h"; then
-  if test -f "$GNUSTEP_LDIR/libobjc.a" -o -f "$GNUSTEP_LDIR/libobjc.so" -o -f "$GNUSTEP_LDIR/libobjc.dll.a" -o -f "$GNUSTEP_LDIR/libobjc-gnu.dylib"; then
-    gs_cv_objc_libdir="$GNUSTEP_LDIR"
-    gs_cv_objc_incdir="$GNUSTEP_HDIR"
-    gs_cv_objc_tools="$GNUSTEP_NETWORK_TOOLS"
-  fi
-fi
-
-# Try GNUSTEP_LOCAL_LIBRARIES third (override GNUSTEP_SYSTEM and
-# GNUSTEP_NETWORK if found)
-if test "$GNUSTEP_IS_FLATTENED" = yes; then
-  GNUSTEP_LDIR="$GNUSTEP_LOCAL_LIBRARIES"
-  GNUSTEP_HDIR="$GNUSTEP_LOCAL_HEADERS"
-else
-  GNUSTEP_LDIR="$GNUSTEP_LOCAL_LIBRARIES/$obj_dir"
-  GNUSTEP_HDIR="$GNUSTEP_LOCAL_HEADERS/$LIBRARY_COMBO"
-fi
-
-if test -f "$GNUSTEP_HDIR/objc/objc.h"; then
-  if test -f "$GNUSTEP_LDIR/libobjc.a" -o -f "$GNUSTEP_LDIR/libobjc.so" -o -f "$GNUSTEP_LDIR/libobjc.dll.a" -o -f "$GNUSTEP_LDIR/libobjc-gnu.dylib"; then
-    gs_cv_objc_libdir="$GNUSTEP_LDIR"
-    gs_cv_objc_incdir="$GNUSTEP_HDIR"
-    gs_cv_objc_tools="$GNUSTEP_LOCAL_TOOLS"
-  fi
-fi
-#gcc_shared_libobjc=`gcc -print-file-name=libobjc.so`
-#if test -f "$gcc_shared_libobjc"; then
-#  gs_cv_objc_libdir=`dirname $gcc_shared_libobjc`
-#fi
-])
-AC_MSG_RESULT($gs_cv_objc_libdir)
-
-if test "$gs_cv_objc_libdir" != "NONE"; then
-  # The following are needed to compile the test programs
-  OBJC_CPPFLAGS="$CPPFLAGS $INCLUDES -I$gs_cv_objc_incdir"
-  OBJC_LDFLAGS="$LDFLAGS $LIB_DIR -L$gs_cv_objc_libdir"
-
-  # And the following to execute them
-  LD_LIBRARY_PATH="$LD_LIBRARY_PATH:$gs_cv_objc_libdir"
-  export LD_LIBRARY_PATH
-  # Need to also add the Tools library on mingw
-  case $host_os in
-    *mingw32* )
-      PATH=$PATH:$gs_cv_objc_tools;;
-    * )
-      ;;
-  esac
-fi
-
 # Special case for Apple systems: When compiling plain C source files that
 # include Objective-C runtime headers we must make sure that the correct
 # header files are used with a gnu-*-* combo. The -fobjc-runtime=gcc compiler
@@ -1196,75 +1099,53 @@ case $target_os-$ac_cv_library_combo in
 esac
 AC_SUBST(cc_gnuruntime)
 
-# TODO: This flag needs to be moved to gnustep-base since it concerns
-# the runtime library (see explanations at the beginning of this
-# file).
-AC_MSG_CHECKING(for the flag to link libobjc)
-AC_ARG_WITH(objc-lib-flag,[
---with-objc-lib-flag
-   Specify a different flag to link libobjc (the Objective-C runtime
-   library).  The default is -lobjc.  In some situations you may have
-   multiple versions of libobjc installed and if your linker supports
-   it you may want to specify exactly which one must be used; for
-   example on GNU/Linux you should be able to use
-     --with-objc-lib-flag=-l:libobjc.so.1
-   to request libobjc.so.1 (as opposed to, say, libobjc.so.2) to be
-   linked.
-],
-OBJC_LIB_FLAG="$withval",
-OBJC_LIB_FLAG=""
-)
-# We pass the flag, unchanged, to gnustep-make - if it's empty,
-# gnustep-make will be free to use -lobjc
-AC_SUBST(OBJC_LIB_FLAG)
+dnl these macros are required by GS_CHECK_OBJC_RUNTIME, but we need to explicitly execute them here because we wrap this initial use of the macro in an
+dnl conditional
+AC_PROG_SED()
+GS_OBJ_DIR()
+GS_OBJC_LIB_FLAG()
+GS_LIBOBJC_PKG()
 
-# But we need to compute, and print out, what flag we're using now.
-OBJC_FINAL_LIB_FLAG="$OBJC_LIB_FLAG"
+if test "$OBJC_RUNTIME_LIB" = "gnu" -a x"$gs_cv_cc_is_clang" = x"yes" -a  x"$gs_cv_library_combo_implicit" = x"yes"; then
+  dnl in order to determine whether the installed runtime library supports the `ng' library combo,
+  dnl we need to detect the runtime with that combo specifically. Unfortunately,
+  dnl GS_CHECK_OBJC_RUNTIME is a very invasive macro that sets up lots of variables needed later on. 
+  dnl For that reason, we need to save the state of  all variables that are changed by this and
+  dnl restore them afterwards
+  m4_define([rt_save_variables], [[OBJC_CPPFLAGS],dnl
+                                  [OBJC_LDFLAGS],dnl
+                                  [OBJC_FINAL_LIB_FLAG],dnl
+                                  [CFLAGS],dnl
+                                  [LIBS],dnl
+                                  [saved_CFLAGS],dnl
+                                  [saved_LDFLAGS],dnl
+                                  [OBJCRT],dnl
+                                  [LD_LIBRARY_PATH],dnl
+                                  [PATH]])
 
-AC_MSG_CHECKING(whether the compiler is clang)
-if test ! x"${GCC}" = x"yes" ; then
-  CLANG_CC=no
-  AC_MSG_RESULT(no)
-else
-  if "${CC}" -v 2>&1 | grep -q 'clang version'; then
-    CLANG_CC=yes
-    AC_MSG_RESULT(yes)
-  else
-    CLANG_CC=no
-    AC_MSG_RESULT(no)
-  fi
-fi
-AC_SUBST(CLANG_CC)
+  m4_foreach([to_save], [rt_save_variables], [dnl
+      AS_VAR_SET([m4_join([_], [gs_cv_ng_rt_saved], m4_strip(to_save))], m4_join([], [$], m4_strip(to_save)))
+  ])dnl
+  GS_CHECK_OBJC_RUNTIME([NG], [ng-gnu-gnu])
 
-saved_CFLAGS="$CFLAGS"
-saved_LIBS="$LIBS"
-CFLAGS="$CFLAGS -x objective-c -I$srcdir $OBJC_CPPFLAGS $OBJC_LDFLAGS"
-if test "$OBJC_RUNTIME_LIB" = "gnu"; then
-  if test x"$CLANG_CC" = x"yes"; then
-    CFLAGS="$CFLAGS -fobjc-runtime=gcc"
-  fi
-  CFLAGS="$CFLAGS -DGNU_RUNTIME"
-  if test "$OBJC_FINAL_LIB_FLAG" = ""; then
-    OBJC_FINAL_LIB_FLAG=-lobjc
-  fi
-  OBJCRT="$OBJC_FINAL_LIB_FLAG"
-fi
-if test "$OBJC_RUNTIME_LIB" = "nx"; then
-  CFLAGS="$CFLAGS -DNeXT_RUNTIME"
-  if test "$OBJC_FINAL_LIB_FLAG" = ""; then
-    OBJC_FINAL_LIB_FLAG=-lobjc
-  fi
-  OBJCRT="$OBJC_FINAL_LIB_FLAG"
-fi
-if test "$OBJC_RUNTIME_LIB" = "apple"; then
-  CFLAGS="$CFLAGS -DAPPLE_RUNTIME"
-  if test "$OBJC_FINAL_LIB_FLAG" = ""; then
-    OBJC_FINAL_LIB_FLAG=-lobjc
-  fi
-  OBJCRT="$OBJC_FINAL_LIB_FLAG"
+  dnl The gnustep runtime library has objc_test_capability -- the GCC runtime doesn't, so we can use  this
+  dnl to distinguish between them
+  AC_CHECK_FUNC([objc_test_capability], [
+    GS_LIBRARY_COMBO([ng-gnu-gnu],[yes])
+    LIBRARY_COMBO=ng-gnu-gnu
+    AC_MSG_NOTICE([library combo has been upgraded to `ng-gnu-gnu' because compiler/runtime support is available. To prevent this, pass --with-library-combo explicitly.])
+  ])
+
+  dnl restare state
+  m4_foreach([saved_var], [rt_save_variables], [dnl
+    AS_VAR_SET([m4_strip(saved_var)], m4_join([], [$gs_cv_ng_rt_saved_], m4_strip(saved_var)))
+    AS_UNSET(m4_join([_], [gs_cv_ng_rt_saved], m4_strip(saved_var)))
+  ])dnl
+   m4_undefine([rt_save_variables])
 fi
 
-AC_MSG_RESULT($OBJC_FINAL_LIB_FLAG)
+
+GS_CHECK_OBJC_RUNTIME()
 
 #--------------------------------------------------------------------
 # Check if libobjc was compiled with thread support.
@@ -1289,86 +1170,67 @@ fi
 AC_MSG_CHECKING(whether objc has thread support)
 if test "$OBJC_THREAD" != ""; then
   LIBS="$OBJCRT $LIBS $OBJC_THREAD"
-  AC_TRY_RUN([#include "config_thread.m"], 
-	objc_threaded="$OBJC_THREAD",
-	objc_threaded="", objc_threaded="")
+  AC_RUN_IFELSE([AC_LANG_SOURCE([[#include "config_thread.m"]])],[objc_threaded="$OBJC_THREAD"],[objc_threaded=""],[objc_threaded=""])
 elif test "$host_os" = linux-gnu; then
   LIBS="$OBJCRT -lpthread"
-  AC_TRY_RUN([#include "config_thread.m"], objc_threaded="-lpthread",
-	objc_threaded="", objc_threaded="-lpthread")
+  AC_RUN_IFELSE([AC_LANG_SOURCE([[#include "config_thread.m"]])],[objc_threaded="-lpthread"],[objc_threaded=""],[objc_threaded="-lpthread"])
   if test x"$objc_threaded" = x""; then
     LIBS="$OBJCRT"
-    AC_TRY_RUN([#include "config_thread.m"],
-          objc_threaded="works",
-	  objc_threaded="", objc_threaded="works")
+    AC_RUN_IFELSE([AC_LANG_SOURCE([[#include "config_thread.m"]])],[objc_threaded="works"],[objc_threaded=""],[objc_threaded="works"])
+  fi
+elif test "$host_os" = linux-musl; then
+  LIBS="$OBJCRT -lpthread"
+  AC_RUN_IFELSE([AC_LANG_SOURCE([[#include "config_thread.m"]])],[objc_threaded="-lpthread"],[objc_threaded=""],[objc_threaded="-lpthread"])
+  if test x"$objc_threaded" = x""; then
+    LIBS="$OBJCRT"
+    AC_RUN_IFELSE([AC_LANG_SOURCE([[#include "config_thread.m"]])],[objc_threaded="works"],[objc_threaded=""],[objc_threaded="works"])
   fi
 elif test "`echo $host_os|sed 's/[[0-9]].*//'|sed s/elf//`" = freebsd; then
   LIBS="-pthread $OBJCRT"
-  AC_TRY_RUN([#include "config_thread.m"], objc_threaded="-pthread",
-       objc_threaded="", objc_threaded="-pthread")
+  AC_RUN_IFELSE([AC_LANG_SOURCE([[#include "config_thread.m"]])],[objc_threaded="-pthread"],[objc_threaded=""],[objc_threaded="-pthread"])
   if test x"$objc_threaded" = x""; then
     LIBS="-lpthread $OBJCRT"
-    AC_TRY_RUN([#include "config_thread.m"], objc_threaded="-lpthread",
-	objc_threaded="", objc_threaded="-lpthread")
+    AC_RUN_IFELSE([AC_LANG_SOURCE([[#include "config_thread.m"]])],[objc_threaded="-lpthread"],[objc_threaded=""],[objc_threaded="-lpthread"])
   fi
   if test x"$objc_threaded" = x""; then
     LIBS="$OBJCRT -lpcthread"
-    AC_TRY_RUN([#include "config_thread.m"], objc_threaded="-lpcthread",
-	objc_threaded="", objc_threaded="-lpcthread")
+    AC_RUN_IFELSE([AC_LANG_SOURCE([[#include "config_thread.m"]])],[objc_threaded="-lpcthread"],[objc_threaded=""],[objc_threaded="-lpcthread"])
   fi
   if test x"$objc_threaded" = x""; then
     LIBS="$OBJCRT"
-    AC_TRY_RUN([#include "config_thread.m"],
-          objc_threaded="works",
-	  objc_threaded="", objc_threaded="works")
+    AC_RUN_IFELSE([AC_LANG_SOURCE([[#include "config_thread.m"]])],[objc_threaded="works"],[objc_threaded=""],[objc_threaded="works"])
   fi
 elif test "$MINGW32" = yes; then
   # Mingw doesn't need anything extra for threads
   LIBS="$OBJCRT $LIBS"
-  AC_TRY_RUN([#include "config_thread.m"], 
-	objc_threaded="works",
-	objc_threaded="", objc_threaded="works")
+  AC_RUN_IFELSE([AC_LANG_SOURCE([[#include "config_thread.m"]])],[objc_threaded="works"],[objc_threaded=""],[objc_threaded="works"])
 elif test "$MINGW64" = yes; then
   # Mingw doesn't need anything extra for threads
   LIBS="$OBJCRT $LIBS"
-  AC_TRY_RUN([#include "config_thread.m"], 
-	objc_threaded="works",
-	objc_threaded="", objc_threaded="works")
+  AC_RUN_IFELSE([AC_LANG_SOURCE([[#include "config_thread.m"]])],[objc_threaded="works"],[objc_threaded=""],[objc_threaded="works"])
 elif test "$OBJC_RUNTIME_LIB" = "apple"; then
   # Apple doesn't need anything extra for threads
   LIBS="$OBJCRT $LIBS"
-  AC_TRY_RUN([#include "config_thread.m"], 
-	objc_threaded="works",
-	objc_threaded="", objc_threaded="works")
+  AC_RUN_IFELSE([AC_LANG_SOURCE([[#include "config_thread.m"]])],[objc_threaded="works"],[objc_threaded=""],[objc_threaded="works"])
 else
   LIBS="$OBJCRT $LIBS"
-  AC_TRY_RUN([#include "config_thread.m"], 
-	objc_threaded="works",
-	objc_threaded="", objc_threaded="")
+  AC_RUN_IFELSE([AC_LANG_SOURCE([[#include "config_thread.m"]])],[objc_threaded="works"],[objc_threaded=""],[objc_threaded=""])
   if test x"$objc_threaded" = x""; then
     LIBS="$OBJCRT $saved_LIBS -lpthread "
-    AC_TRY_RUN([#include "config_thread.m"], 
-    	objc_threaded="-lpthread", 
-	objc_threaded="", objc_threaded="")
+    AC_RUN_IFELSE([AC_LANG_SOURCE([[#include "config_thread.m"]])],[objc_threaded="-lpthread"],[objc_threaded=""],[objc_threaded=""])
   fi
   if test x"$objc_threaded" = x""; then
     # Solaris, OpenBSD/sparc
     LIBS="$OBJCRT $saved_LIBS -lpthread -lposix4"
-    AC_TRY_RUN([#include "config_thread.m"], 
-    	objc_threaded="-lpthread -lposix4", 
-	objc_threaded="", objc_threaded="")
+    AC_RUN_IFELSE([AC_LANG_SOURCE([[#include "config_thread.m"]])],[objc_threaded="-lpthread -lposix4"],[objc_threaded=""],[objc_threaded=""])
   fi
   if test x"$objc_threaded" = x""; then
     LIBS="$OBJCRT $saved_LIBS -lthread "
-    AC_TRY_RUN([#include "config_thread.m"], 
-    	objc_threaded="-lthread", 
-	objc_threaded="", objc_threaded="")
+    AC_RUN_IFELSE([AC_LANG_SOURCE([[#include "config_thread.m"]])],[objc_threaded="-lthread"],[objc_threaded=""],[objc_threaded=""])
   fi
   if test x"$objc_threaded" = x""; then
     LIBS="$OBJCRT"
-    AC_TRY_RUN([#include "config_thread.m"], 
-          objc_threaded="works",
-	  objc_threaded="", objc_threaded="works")
+    AC_RUN_IFELSE([AC_LANG_SOURCE([[#include "config_thread.m"]])],[objc_threaded="works"],[objc_threaded=""],[objc_threaded="works"])
   fi
 fi
 if test x"$objc_threaded" = x""; then
@@ -1385,17 +1247,11 @@ AC_SUBST(ac_cv_objc_threaded)
 
 AC_MSG_CHECKING(whether Objective-C++ is supported)
 
-# Only new autoconf supports ObjC++ so we use C++ instead for now
-#AC_LANG_PUSH(Objective C++)
-#OBJCXXFLAGS_saved="$OBJCXXFLAGS"
-#OBJCXXFLAGS="$OBJCXXFLAGS -x objective-c++"
-#OBJCXXPPFLAGS_saved="$OBJCXXPPFLAGS"
-#OBJCXXPPFLAGS="$OBJCXXPPFLAGS -x objective-c++"
-AC_LANG_PUSH(C++)
-CXXFLAGS_saved="$CXXFLAGS"
-CXXFLAGS="$CXXFLAGS -x objective-c++"
-CXXPPFLAGS_saved="$CXXPPFLAGS"
-CXXPPFLAGS="$CXXPPFLAGS -x objective-c++"
+AC_LANG_PUSH(Objective C++)
+OBJCXXFLAGS_saved="$OBJCXXFLAGS"
+OBJCXXFLAGS="$OBJCXXFLAGS -x objective-c++"
+OBJCXXPPFLAGS_saved="$OBJCXXPPFLAGS"
+OBJCXXPPFLAGS="$OBJCXXPPFLAGS -x objective-c++"
 
 AC_COMPILE_IFELSE([AC_LANG_SOURCE([[
 
@@ -1421,13 +1277,9 @@ if test x"$objcc" = x"no"; then
   OBJCXX=
 fi
 AC_SUBST(OBJCXX)
-# Only new autoconf supports ObjC++ so we use C++ instead for now
-#OBJCXXFLAGS="$OBJCXXFLAGS_saved"
-#OBJCXXPPFLAGS="$OBJCXXPPFLAGS_saved"
-#AC_LANG_POP(Objective C++)
-CXXFLAGS="$CXXFLAGS_saved"
-CXXPPFLAGS="$CXXPPFLAGS_saved"
-AC_LANG_POP(C++)
+OBJCXXFLAGS="$OBJCXXFLAGS_saved"
+OBJCXXPPFLAGS="$OBJCXXPPFLAGS_saved"
+AC_LANG_POP(Objective C++)
 
 #--------------------------------------------------------------------
 # Check if compiler supports -fobjc-arc, and if so, turn it on!
@@ -1446,7 +1298,7 @@ if test x"$USE_ARC" = x"yes"; then
   # What we want to do: set USE_ARC to yes if we can compile
   # something with -fobjc-arc.
   CFLAGS_no_arc="$CFLAGS"
-  CFLAGS="$CFLAGS -fobjc-runtime=gnustep-1.8 -fobjc-arc"
+  CFLAGS="$CFLAGS -fobjc-runtime=gnustep-2.2 -fobjc-arc"
   AC_COMPILE_IFELSE([AC_LANG_SOURCE([[
 /* Note that we never execute this code so it does not really matter
    what it is.  We are testing that the compiler accepts the
@@ -1523,34 +1375,14 @@ AC_SUBST(OBJ_MERGE_CMD_FLAG)
 # Check for the GCC version - this is used in the following tests
 #--------------------------------------------------------------------
 
-AC_MSG_CHECKING(for the GCC version)
-if test ! x"${GCC}" = x"yes" ; then
-  AC_MSG_RESULT(no: it's not gcc)
-else
-  # Running gcc -dumpversion we get something like 2.95.4 or
-  #  egcs-2.91.66 or 3.0.2 or 3.1 20011211
-  # We want to discard anything but the major number.
-  # Explanation of the regexp -
-  # \([^0-9]*\) matches non numeric chars at the beginning
-  # \([0-9][0-9]*\) matches 1 or more numeric chars (this is the 2^nd
-  #  subpattern)
-  # \([^0-9]*\) matches one or more non numeric chars
-  # \([0-9][0-9]*\) matches 1 or more numeric chars (this is the 4^nd
-  #  subpattern)
-  # \([^0-9].*\) matches a non numeric char followed by anything
-  # /\2/ replace the whole lot with the 2^nd subpattern
-  # /\4/ replace the whole lot with the 4^nd subpattern
-  # All square brackets are doubled because this file is processed by m4 first.
-  # Finally, any error messages are redirected to &5, so that they are logged
-  # into config.log but don't clutter the normal user output.
-  gs_cv_gcc_major_version=`(${CC} -dumpversion | sed "s/\([[^0-9]]*\)\([[0-9]][[0-9]]*\)\([[^0-9]]*\)\([[0-9]][[0-9]]*\)\([[^0-9]]*.*\)/\2/") 2>&5`;
-  gs_cv_gcc_minor_version=`(${CC} -dumpversion | sed "s/\([[^0-9]]*\)\([[0-9]][[0-9]]*\)\([[^0-9]]*\)\([[0-9]][[0-9]]*\)\([[^0-9]]*.*\)/\4/") 2>&5`;
+GS_CHECK_GCC_VERSION()
 
-  gs_cv_gcc_parsed_version=${gs_cv_gcc_major_version}.${gs_cv_gcc_minor_version}
 
-  AC_MSG_RESULT(version: ${gs_cv_gcc_parsed_version})
+GS_RUNTIME_ABI()
+# If we determined that the user wants the gnustep-2.0 ABI, check for potential linker problems.
+if test $gs_cv_runtime_abi = 'gnustep-2.0'; then
+  GS_CHECK_ABI20_LINKER()
 fi
-
 # Do not restore LIBS and CFLAGS yet as we need to test if the
 # compiler supports native exceptions.
 
@@ -1574,7 +1406,7 @@ USE_OBJC_EXCEPTIONS=$enableval,
 USE_OBJC_EXCEPTIONS=maybe)
 
 if test x"$USE_OBJC_EXCEPTIONS" = x"maybe"; then
-  if test x"$MSWIND" = x"yes"; then
+  if test x"$MSWIND" = x"yes" -a "$OBJC_RUNTIME_LIB" = "gnu"; then
     USE_OBJC_EXCEPTIONS=no
   fi
 fi
@@ -1946,8 +1778,17 @@ AC_CHECK_PROGS(LATEX2HTML, latex2html)
 #--------------------------------------------------------------------
 # For test framework
 #--------------------------------------------------------------------
-AC_PATH_PROG(SHELLPROG,bash,/bin/sh)
+AC_PATH_PROG(SHELLPROG, bash)
 AC_PATH_PROG(TESTPROG, test)
+if test x"$SHELLPROG" = x""; then
+  echo "Unable to find the bash program (needed for testsuite)."
+  SHELLPROG=/bin/sh
+  MISSINGBASH=YES
+else
+  MISSINGBASH=NO
+fi
+AC_SUBST(MISSINGBASH)
+
 
 #--------------------------------------------------------------------
 # Produce the output files
@@ -1955,6 +1796,7 @@ AC_PATH_PROG(TESTPROG, test)
 AC_CONFIG_FILES([config-noarch.make config.make openapp opentool 
 executable.template GNUmakefile GNUstep.conf GNUstep-strict-v2.conf
 GNUstep.sh GNUstep.csh fixpath.sh
+GNUstep-reset.sh
 gnustep-make.spec gnustep-config TestFramework/gnustep-tests
 filesystem.make filesystem.sh filesystem.csh gnustep-make-ld.so.conf])
 AC_CONFIG_FILES([runtime/$OBJC_RUNTIME_LIB.make:config.make.in])

@@ -9,6 +9,78 @@
 The currently released version is @samp{@value{GNUSTEP-MAKE-VERSION}}.
 @end ifclear
 
+@section Changes in version @samp{2.9.2}
+
+@itemize
+
+@item  Update for newer versions of Java
+
+@item  Various minor bugfixes.
+
+@end itemize
+
+@ifclear ANNOUNCE-ONLY
+
+@section Changes in version @samp{2.9.1}
+
+@itemize
+
+@item  Add workaround for Clang bug on Windows MSVC when tests contain no Objective-C constructs.
+
+@item  Various fixes for minor issues introduced in the test framework by parallelisation mof testcase execution.
+
+@end itemize
+
+@section Changes in version @samp{2.9.0}
+
+@itemize
+
+@item Better check for objc runtime on Windows.
+
+@item Split linker flags to better support partial linking: @code{ALL_LDFLAGS}
+is now a combination of @code{FINAL_LDFLAGS} and @code{ALL_LDFLAGS}.
+
+@item Better support for newer gcc versions.
+
+@item Add support for storyboard files.
+
+@item Increase autoconf version to 2.65 and make autoconf handle Objective-C++
+and OBJCXX variables directly.
+
+@item Fix bug that prevented ARC from getting used.
+
+@item Link subproject object files directly instead of first merging them into
+@code{subproject.o}.
+
+@item Support building on Windows with Clang MSVC target.
+
+@item Improve mingw64 support: for instance, adopt the triplet used by the
+mingw-w64 project rather than using the one returned by autoconf. Fixes building
+Gorm.
+
+@end itemize
+
+@section Changes in version @samp{2.8.0}
+
+@itemize
+
+@item Better library combo and ABI detection: gnustep-make will now attempt to 
+detect the optimal library combo and ABI supported by the installed compiler 
+and Objective-C runtime library. Explicit selection of the runtime ABI is now
+possible using the @code{--with-runtime-abi} configure option.
+
+@item Full support for the gnustep-2.0 Objective-C ABI.
+
+@item Support for creating a Git tag and creating a tarball from a git tag 
+using the @code{git-tag} and @code{git-dist} targets.
+
+@item Support for creating a Mercurial tag and creating a tarball from a hg
+tag using the @code{hg-tag} and @code{hg-dist} targets.
+
+@item Dropped legacy Rhapsody and FreeBSD-out support.
+
+@end itemize
+
 @section Changes in version @samp{2.7.0}
 
 Garbage collection support removed
@@ -20,8 +92,6 @@ Multi-architecture directory layout adjusted to be more Debian compatible
 Framework support fixes
 
 Various other minor bugfixes
-
-@ifclear ANNOUNCE-ONLY
 
 @section Changes in version @samp{2.6.8}
 

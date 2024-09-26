@@ -204,6 +204,54 @@ ifeq ($(AUTO_DEPENDENCIES_FLAGS),)
 endif
 endif
 
+#
+# Detect ARC support
+ifeq ($(OBJC_RUNTIME_LIB), ng)
+  GS_RUNTIME_HAS_ARC = 1
+endif
+ifeq ($(OBJC_RUNTIME_LIB), apple)
+  DARWIN_VERSION = $(patsubst darwin%,%,$(filter darwin%, $(GNUSTEP_TARGET_OS)))
+# Initial release of ARC in darwin10
+  ifeq ($(shell echo "$(DARWIN_VERSION) >= 10" | bc), 1)
+    GS_RUNTIME_HAS_ARC = 1
+  endif
+endif
+
+ifneq ($(GS_RUNTIME_HAS_ARC),)
+  # Projects may control the use of ARC by defining GS_WITH_ARC=1
+  # or GS_WITH_ARC=0 in their GNUmakefile, or in the environment,
+  # or as an argument to the 'make' command.
+  # The default behavior is not to use ARC, unless GNUSTEP_NG_ARC is
+  # set to 1 (perhaps in the GNUstep config file; GNUstep.conf).
+  # The value of ARC_OBJCFLAGS is used to specify the flags passed
+  # to the compiler when building ARC code.  If it has not been set,
+  # it defaults to -fobjc-arc -fobjc-arc-exceptions so that objects
+  # are not leaked when an exception is raised. 
+  # The value of ARC_CPPFLAGS is used to specify the flags passed
+  # to the preprocessor when building ARC code.  If it has not been set,
+  # it defaults to -DGS_WITH_ARC=1
+  ifeq ($(GS_WITH_ARC),)
+    ifeq ($(GNUSTEP_NG_ARC), 1)
+      GS_WITH_ARC=1
+    endif
+  endif
+  ifeq ($(GS_WITH_ARC), 1)
+    ifeq ($(ARC_OBJCFLAGS),)
+      ARC_OBJCFLAGS = -fobjc-arc -fobjc-arc-exceptions
+    endif
+    ifeq ($(ARC_CPPFLAGS),)
+      ARC_CPPFLAGS = -DGS_WITH_ARC=1
+    endif
+    INTERNAL_OBJCFLAGS += $(ARC_OBJCFLAGS)
+  else
+    ARC_OBJCFLAGS=
+    ARC_CPPFLAGS=
+  endif
+else
+  ARC_OBJCFLAGS=
+  ARC_CPPFLAGS=
+endif
+
 # The difference between ADDITIONAL_XXXFLAGS and AUXILIARY_XXXFLAGS is the
 # following:
 #
@@ -241,7 +289,7 @@ endif
 #
 
 ALL_CPPFLAGS = $(AUTO_DEPENDENCIES_FLAGS) $(CPPFLAGS) $(ADDITIONAL_CPPFLAGS) \
-               $(AUXILIARY_CPPFLAGS)
+               $(AUXILIARY_CPPFLAGS) $(ARC_CPPFLAGS)
 
 # -I./obj/PrecompiledHeaders/ObjC must be before anything else because
 # we want an existing and working precompiled header to be used before
@@ -302,16 +350,23 @@ $(ADDITIONAL_JAVACFLAGS) $(AUXILIARY_JAVACFLAGS)
 ALL_JAVAHFLAGS = $(INTERNAL_CLASSPATHFLAGS) $(ADDITIONAL_JAVAHFLAGS) \
 $(AUXILIARY_JAVAHFLAGS)
 
+# CORE_LDFLAGS are those used for both partial link and final link.
 ifeq ($(shared),no)
-  ALL_LDFLAGS = $(STATIC_LDFLAGS)
+  CORE_LDFLAGS = $(STATIC_LDFLAGS)
 else
-  ALL_LDFLAGS =
+  CORE_LDFLAGS =
 endif
-ALL_LDFLAGS += $(ADDITIONAL_LDFLAGS) $(AUXILIARY_LDFLAGS) $(GUI_LDFLAGS) \
+CORE_LDFLAGS += $(ADDITIONAL_LDFLAGS) $(AUXILIARY_LDFLAGS) $(GUI_LDFLAGS) \
                $(BACKEND_LDFLAGS) $(SYSTEM_LDFLAGS) $(INTERNAL_LDFLAGS)
+
+# ALL_LDFLAGS are the set of flags used in the final link of an executable
+# or a shared library/bundle.
+ALL_LDFLAGS += $(CORE_LDFLAGS) $(FINAL_LDFLAGS)
+
 # In some cases, ld is used for linking instead of $(CC), so we can't use
 # this in ALL_LDFLAGS
-CC_LDFLAGS = $(RUNTIME_FLAG)
+CC_LDFLAGS = $(RUNTIME_FLAG) $(ARC_OBJCFLAGS)
+
 
 ALL_LIB_DIRS = $(ADDITIONAL_FRAMEWORK_DIRS) $(AUXILIARY_FRAMEWORK_DIRS) \
    $(ADDITIONAL_LIB_DIRS) $(AUXILIARY_LIB_DIRS) \
@@ -533,14 +588,6 @@ ifeq ($(findstring mingw32, $(GNUSTEP_TARGET_OS)), mingw32)
 # A rule to generate a .o file from the .rc file.
 $(GNUSTEP_OBJ_INSTANCE_DIR)/%.rc$(OEXT): %.rc
 	$(ECHO_COMPILING)windres $< $@$(END_ECHO)
-
-else ifeq ($(findstring mingw64, $(GNUSTEP_TARGET_OS)), mingw64)
-# Add the .rc suffix on Windows.
-.SUFFIXES: .rc
-
-# A rule to generate a .o file from the .rc file.
-$(GNUSTEP_OBJ_INSTANCE_DIR)/%.rc$(OEXT): %.rc
-	$(ECHO_COMPILING)windres $< $@$(END_ECHO)
 endif
 
 ifeq ($(GCC_WITH_PRECOMPILED_HEADERS),yes)
@@ -625,10 +672,28 @@ endif
 # Example of how this rule will be applied: 
 # gnu/gnustep/base/NSObject.h : gnu/gnustep/base/NSObject.java
 #	javah -o gnu/gnustep/base/NSObject.h gnu.gnustep.base.NSObject
+# or, on more recent releases than 8, we have to use javac and move the
+# resulting header file around t the correct location as javac does not
+# provide command line options to control the output file name.
+# NB. javac also fails to produce a header file when a java file does
+# not produce class information, so we catch that and generate an empty
+# header  where necessary.
 %.h : %.java
-	$(ECHO_JAVAHING)$(JAVAH) \
-	         $(filter-out $($<_FILE_FILTER_OUT_FLAGS),$(ALL_JAVAHFLAGS)) \
-	         $($<_FILE_FLAGS) -o $@ $(subst /,.,$*)$(END_ECHO)
+	$(ECHO_NOTHING)if [ -x $(JAVAH) ]; then \
+	  $(JAVAH) \
+	    $(filter-out $($<_FILE_FILTER_OUT_FLAGS),$(ALL_JAVAHFLAGS)) \
+	    $($<_FILE_FLAGS) -o $@ $(subst /,.,$*); \
+        else \
+	  JAVA_DST_DIR=`dirname $@`; \
+	  $(JAVAC) -h $$JAVA_DST_DIR -sourcepath `dirname $*` \
+	    $(filter-out $($<_FILE_FILTER_OUT_FLAGS),$(ALL_JAVAHFLAGS)) \
+	    $($<_FILE_FLAGS) $*.java; \
+	  if [ -e $$JAVA_DST_DIR/$(subst /,_,$@) ]; then \
+	    mv $$JAVA_DST_DIR/$(subst /,_,$@) $$JAVA_DST_DIR/`basename $@`; \
+	  else \
+	    touch $$JAVA_DST_DIR/`basename $@`; \
+	  fi \
+	fi$(END_ECHO)
 
 %.c : %.psw
 	pswrap -h $*.h -o $@ $<

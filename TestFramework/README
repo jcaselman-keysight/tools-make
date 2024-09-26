@@ -135,6 +135,10 @@ option to have testing stopped at the first failure and the gdb debugger
 automatically launched to debug the failed testcase with a breakpoint set
 in the testStart() function for that testcase.
 
+You can use the --notimestamps command line option to turn off timestamps of
+individual testcases if you want a less verbose output (though test code may
+override this default by setting the testTimestamps variable itself).
+
 You can also use the --developer command line option to define the TESTDEV
 pre-processor variable (to turn on developer only test cases, and to have
 all 'hopes' treated as actual 'tests' with pass/fail results).
@@ -283,6 +287,11 @@ program will normally build up to four tests at a time, but you can change
 that by setting the MAKEFLAGS environment variable to '-j N' where N is the
 number of simultaneous builds you want to be permitted (or you can simply
 use 'gnustep-tests --sequential' to force building of one test at a time).
+
+Running of the tests is, by default, done sequentially in alphabetical order,
+but this may be overridden to change the order of sequential tests and to run
+tests concurrently.  The mechanism for this is to set values in the TestInfo
+file.
 
 For total control, the framework checks to see if a 'GNUmakefile.tests' file
 exists in the directory, and if it does it uses that file as a template to

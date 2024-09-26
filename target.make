@@ -24,6 +24,9 @@
 # the 'shared' variable, because we have not set it up yet when this
 # file is processed!
 
+# variable to for all OSs treated as Linux and Linux-like
+IS_LINUX = no
+
 #
 # Host and target specific settings
 #
@@ -34,15 +37,27 @@ endif
 #
 # Target specific libraries
 #
-TARGET_SYSTEM_LIBS = $(CONFIG_SYSTEM_LIBS) -lm
+TARGET_SYSTEM_LIBS = $(CONFIG_SYSTEM_LIBS)
+ifneq ($(GNUSTEP_TARGET_OS), windows)
+	TARGET_SYSTEM_LIBS += -lm
+endif
 
 # All code we build needs to be thread-safe nowadays
 INTERNAL_CFLAGS = -pthread
 INTERNAL_OBJCFLAGS = -pthread
-ifeq ($(findstring android, $(GNUSTEP_TARGET_OS)), android)
-  INTERNAL_LDFLAGS = 
-else
-  INTERNAL_LDFLAGS = -pthread
+INTERNAL_LDFLAGS =
+  
+ifeq ($(debug), yes)
+  # Embed PDB Debug Info on Windows MSVC
+  ifeq ($(findstring windows, $(GNUSTEP_TARGET_OS)), windows)
+    INTERNAL_LDFLAGS += -Wl,-debug
+  endif
+endif
+
+ifneq ($(findstring android, $(GNUSTEP_TARGET_OS)), android)
+	ifneq ($(GNUSTEP_TARGET_OS), windows)
+		INTERNAL_LDFLAGS = -pthread
+	endif
 endif
 
 ifneq ("$(objc_threaded)","")
@@ -56,10 +71,20 @@ ifeq ($(findstring mingw32, $(GNUSTEP_TARGET_OS)), mingw32)
   TARGET_SYSTEM_LIBS = $(CONFIG_SYSTEM_LIBS) \
 	-lws2_32 -ladvapi32 -lcomctl32 -luser32 -lcomdlg32 \
 	-lmpr -lnetapi32 -lm -I. # the -I is a dummy to avoid -lm^M
-else ifeq ($(findstring mingw64, $(GNUSTEP_TARGET_OS)), mingw64)
+else ifeq ($(GNUSTEP_TARGET_OS), windows)
   TARGET_SYSTEM_LIBS = $(CONFIG_SYSTEM_LIBS) \
 	-lws2_32 -ladvapi32 -lcomctl32 -luser32 -lcomdlg32 \
-	-lmpr -lnetapi32 -lm -I. # the -I is a dummy to avoid -lm^M
+	-lmpr -lnetapi32 -lkernel32 -lshell32
+	
+	# link against debug or release UCRT DLLs (i.e. /MDd or /MD)
+	ifeq ($(debug),)
+		debug = $(GNUSTEP_DEFAULT_DEBUG)
+	endif
+	ifeq ($(debug), yes)
+		TARGET_SYSTEM_LIBS += -lmsvcrtd -lvcruntimed -lucrtd
+	else
+		TARGET_SYSTEM_LIBS += -lmsvcrt -lvcruntime -lucrt
+	endif
 endif
 
 ifeq ($(findstring solaris, $(GNUSTEP_TARGET_OS)), solaris)
@@ -156,7 +181,14 @@ endif
 # with XXXX, and prints the result. '-n' disables automatic printing
 # for portability, so we are sure we only print what we want on all
 # platforms.
-EXTRACT_CLASS_NAMES_COMMAND = $(NM) -Pg $$object_file | sed -n -e '/^__objc_class_name_[A-Za-z0-9_.]* [^U]/ {s/^__objc_class_name_\([A-Za-z0-9_.]*\) [^U].*/\1/p;}'
+
+
+#
+# NB. With the gnustep-2.0 ABI the class name prefix is ._OBJC_CLASS_
+# rather than __objc_class_name_ so we search for either.
+#
+EXTRACT_CLASS_NAMES_COMMAND = $(NM) -Pg $$object_file | sed -n -e '/^__objc_class_name_[A-Za-z0-9_.]* [^U]/ {s/^__objc_class_name_\([A-Za-z0-9_.]*\) [^U].*/\1/p;}' -e '/^\._OBJC_CLASS_[A-Za-z0-9_.]* [^U]/ {s/^\._OBJC_CLASS_\([A-Za-z0-9_.]*\) [^U].*/\1/p;}'
+
 
 #
 # This is the generic version - if the target is not in the following list,
@@ -210,7 +242,7 @@ HAVE_SHARED_LIBS = yes
 SHARED_LIBEXT    = .dylib
 
 # The output of nm is slightly different on Darwin, it doesn't support -P
-EXTRACT_CLASS_NAMES_COMMAND = $(NM)  -g $$object_file | sed -n -e '/[^U] ___objc_class_name_/ {s/[0-9a-f]* [^U] ___objc_class_name_//p;}'
+EXTRACT_CLASS_NAMES_COMMAND = $(NM)  -g $$object_file | sed -n -e '/[^U] .__OBJC_CLASS_/ {s/[0-9a-f]* [^U] .__OBJC_CLASS_//p;}' -e '/[^U] ___objc_class_name_/ {s/[0-9a-f]* [^U] ___objc_class_name_//p;}'
 
 ifeq ($(FOUNDATION_LIB), apple)
   ifneq ($(arch),)
@@ -323,7 +355,7 @@ AFTER_INSTALL_SHARED_LIB_CMD = \
          $(LN_S) $(LIB_LINK_VERSION_FILE) $(LIB_LINK_FILE) )
 
 OBJ_MERGE_CMD = \
-	$(LD) -nostdlib -keep_private_externs $(OBJ_MERGE_CMD_FLAG) $(ALL_LDFLAGS) -o $(GNUSTEP_OBJ_DIR)/$(SUBPROJECT_PRODUCT) $^ ;
+	$(LD) -nostdlib -keep_private_externs $(OBJ_MERGE_CMD_FLAG) $(CORE_LDFLAGS) -o $(GNUSTEP_OBJ_DIR)/$(SUBPROJECT_PRODUCT) $^ ;
 
 STATIC_LIB_LINK_CMD	= \
 	/usr/bin/libtool $(STATIC_LD_PREFLAGS) -static $(ARCH_FLAGS) $(ALL_LDFLAGS) -o $@ $^ \
@@ -476,12 +508,23 @@ endif
 
 ####################################################
 #
-# Linux ELF or GNU/Hurd
+# Linux ELF with GNU or GNU/HURD
 #
 # The following ifeq matches both 'linux-gnu' (which is GNU/Linux ELF)
 # and 'gnu0.3' (I've been told GNUSTEP_TARGET_OS is 'gnu0.3' on
-# GNU/Hurd at the moment).  We want the same code in both cases.
+# GNU/Hurd at the moment).
+# We treat GNU/HURD as GNU/Linux for now
 ifeq ($(findstring gnu, $(GNUSTEP_TARGET_OS)), gnu)
+IS_LINUX = yes
+endif
+
+# The following ifeq matches 'linux-musl' but does not re-match 'linux-gnu'
+# We treat is as GNU/Linux
+ifeq ($(findstring linux-musl, $(GNUSTEP_TARGET_OS)), linux-musl)
+IS_LINUX = yes
+endif
+
+ifeq ($(IS_LINUX), yes)
 HAVE_SHARED_LIBS        = yes
 SHARED_LIB_LINK_CMD     = \
         $(LD) $(SHARED_LD_PREFLAGS) -shared -Wl,-soname,$(LIB_LINK_SONAME_FILE) \
@@ -511,7 +554,7 @@ AFTER_INSTALL_SHARED_LIB_CHOWN = \
 	chown $(CHOWN_TO) $(LIB_LINK_FILE))
 
 OBJ_MERGE_CMD		= \
-	$(LD) -nostdlib $(OBJ_MERGE_CMD_FLAG) $(ALL_LDFLAGS) -o $(GNUSTEP_OBJ_DIR)/$(SUBPROJECT_PRODUCT) $^ ;
+	$(LD) -nostdlib $(OBJ_MERGE_CMD_FLAG) $(CORE_LDFLAGS) -o $(GNUSTEP_OBJ_DIR)/$(SUBPROJECT_PRODUCT) $^ ;
 
 SHARED_CFLAGS      += -fPIC
 SHARED_LIBEXT      =  .so
@@ -519,7 +562,7 @@ SHARED_LIBEXT      =  .so
 HAVE_BUNDLES       =  yes
 BUNDLE_LD	   =  $(LD)
 BUNDLE_LDFLAGS     += -shared
-ADDITIONAL_LDFLAGS += -rdynamic
+FINAL_LDFLAGS      = -rdynamic
 STATIC_LDFLAGS += -static
 endif
 #
@@ -560,7 +603,7 @@ AFTER_INSTALL_SHARED_LIB_CHOWN = \
 	chown $(CHOWN_TO) $(LIB_LINK_SONAME_FILE); \
 	chown $(CHOWN_TO) $(LIB_LINK_FILE))
 OBJ_MERGE_CMD		= \
-	$(LD) -nostdlib $(OBJ_MERGE_CMD_FLAG) $(ALL_LDFLAGS) -o $(GNUSTEP_OBJ_DIR)/$(SUBPROJECT_PRODUCT) $^ ;
+	$(LD) -nostdlib $(OBJ_MERGE_CMD_FLAG) $(CORE_LDFLAGS) -o $(GNUSTEP_OBJ_DIR)/$(SUBPROJECT_PRODUCT) $^ ;
 
 SHARED_CFLAGS	+= -fPIC
 SHARED_LIBEXT	= .so
@@ -568,7 +611,7 @@ SHARED_LIBEXT	= .so
 HAVE_BUNDLES	= yes
 BUNDLE_LD	= $(LD)
 BUNDLE_LDFLAGS	+= -shared
-ADDITIONAL_LDFLAGS += -rdynamic
+FINAL_LDFLAGS   = -rdynamic
 STATIC_LDFLAGS += -static
 
 endif
@@ -594,7 +637,7 @@ SHARED_LIB_LINK_CMD = \
 	  $(RM_LN_S) $(LIB_LINK_FILE); \
 	  $(LN_S) $(LIB_LINK_VERSION_FILE) $(LIB_LINK_FILE))
 OBJ_MERGE_CMD		= \
-	$(LD) -nostdlib $(OBJ_MERGE_CMD_FLAG) $(ALL_LDFLAGS) -o $(GNUSTEP_OBJ_DIR)/$(SUBPROJECT_PRODUCT) $^ ;
+	$(LD) -nostdlib $(OBJ_MERGE_CMD_FLAG) $(CORE_LDFLAGS) -o $(GNUSTEP_OBJ_DIR)/$(SUBPROJECT_PRODUCT) $^ ;
 
 SHARED_CFLAGS	+= -fPIC
 SHARED_LIBEXT	= .so
@@ -602,7 +645,7 @@ SHARED_LIBEXT	= .so
 HAVE_BUNDLES	= yes
 BUNDLE_LD	= $(LD)
 BUNDLE_LDFLAGS	+= -shared
-ADDITIONAL_LDFLAGS += -rdynamic
+FINAL_LDFLAGS   = -rdynamic
 ADDITIONAL_INCLUDE_DIRS += 
 STATIC_LDFLAGS += -static
 endif
@@ -627,7 +670,7 @@ SHARED_LIB_LINK_CMD = \
 	  $(RM_LN_S) $(LIB_LINK_FILE); \
 	  $(LN_S) $(LIB_LINK_VERSION_FILE) $(LIB_LINK_FILE))
 OBJ_MERGE_CMD		= \
-	$(LD) -nostdlib $(OBJ_MERGE_CMD_FLAG) $(ALL_LDFLAGS) -o $(GNUSTEP_OBJ_DIR)/$(SUBPROJECT_PRODUCT) $^ ;
+	$(LD) -nostdlib $(OBJ_MERGE_CMD_FLAG) $(CORE_LDFLAGS) -o $(GNUSTEP_OBJ_DIR)/$(SUBPROJECT_PRODUCT) $^ ;
 
 SHARED_CFLAGS	+= -fPIC
 SHARED_LIBEXT	= .so
@@ -635,7 +678,8 @@ SHARED_LIBEXT	= .so
 HAVE_BUNDLES	= yes
 BUNDLE_LD	= $(LD)
 BUNDLE_LDFLAGS	+= -shared
-ADDITIONAL_LDFLAGS += -rdynamic -Wl,-R/usr/pkg/lib -L/usr/pkg/lib -Wl,-R/usr/X11R6/lib -L/usr/X11R6/lib
+ADDITIONAL_LDFLAGS += -Wl,-R/usr/pkg/lib -L/usr/pkg/lib -Wl,-R/usr/X11R6/lib -L/usr/X11R6/lib
+FINAL_LDFLAGS   = -rdynamic
 ADDITIONAL_INCLUDE_DIRS += -I/usr/pkg/include
 STATIC_LDFLAGS += -static
 endif
@@ -673,7 +717,7 @@ AFTER_INSTALL_SHARED_LIB_CMD = \
 	)
 
 OBJ_MERGE_CMD		= \
-	$(LD) -nostdlib $(OBJ_MERGE_CMD_FLAG) $(ALL_LDFLAGS) -o $(GNUSTEP_OBJ_DIR)/$(SUBPROJECT_PRODUCT) $^ ;
+	$(LD) -nostdlib $(OBJ_MERGE_CMD_FLAG) $(CORE_LDFLAGS) -o $(GNUSTEP_OBJ_DIR)/$(SUBPROJECT_PRODUCT) $^ ;
 
 SHARED_CFLAGS   += -fPIC
 SHARED_LIBEXT   = .so
@@ -685,7 +729,9 @@ ADDITIONAL_LDFLAGS += -Wl,-E
 STATIC_LDFLAGS += -static
 
 # nm on OpenBSD is rather like on Darwin
-EXTRACT_CLASS_NAMES_COMMAND = $(NM) -g $$object_file | sed -n -e '/[^U] __objc_class_name_/ {s/[0-9a-f]* [^U] __objc_class_name_//p;}'
+
+EXTRACT_CLASS_NAMES_COMMAND = $(NM) -g $$object_file | sed -n -e '/[^U] ._OBJC_CLASS_/ {s/[0-9a-f]* [^U] ._OBJC_CLASS_//p;}' -e '/[^U] __objc_class_name_/ {s/[0-9a-f]* [^U] __objc_class_name_//p;}'
+
 endif
 #
 # end OpenBSD 3.x
@@ -705,7 +751,7 @@ SHARED_LIB_LINK_CMD = \
 	  $(RM_LN_S) $(LIB_LINK_FILE); \
 	  $(LN_S) $(LIB_LINK_VERSION_FILE) $(LIB_LINK_FILE))
 OBJ_MERGE_CMD		= \
-	$(LD) -nostdlib $(OBJ_MERGE_CMD_FLAG) $(ALL_LDFLAGS) -o $(GNUSTEP_OBJ_DIR)/$(SUBPROJECT_PRODUCT) $^ ;
+	$(LD) -nostdlib $(OBJ_MERGE_CMD_FLAG) $(CORE_LDFLAGS) -o $(GNUSTEP_OBJ_DIR)/$(SUBPROJECT_PRODUCT) $^ ;
 
 SHARED_CFLAGS	+= -fPIC
 SHARED_LIBEXT	= .so
@@ -713,7 +759,7 @@ SHARED_LIBEXT	= .so
 HAVE_BUNDLES	= yes
 BUNDLE_LD	= $(LD)
 BUNDLE_LDFLAGS	+= -shared
-ADDITIONAL_LDFLAGS += -rdynamic
+FINAL_LDFLAGS   = -rdynamic
 STATIC_LDFLAGS += -static
 # Newer gcc's don't define this in Objective-C programs:
 AUXILIARY_CPPFLAGS += -D__LANGUAGES_C__
@@ -762,7 +808,7 @@ SHARED_CFLAGS  += -fPIC
 SHARED_LIBEXT   = .so
 
 OBJ_MERGE_CMD		= \
-	$(LD) $(OBJ_MERGE_CMD_FLAG) $(ALL_LDFLAGS) -o $(GNUSTEP_OBJ_DIR)/$(SUBPROJECT_PRODUCT) $^ ;
+	$(LD) $(OBJ_MERGE_CMD_FLAG) $(CORE_LDFLAGS) -o $(GNUSTEP_OBJ_DIR)/$(SUBPROJECT_PRODUCT) $^ ;
 
 ADDITIONAL_LDFLAGS +=
 STATIC_LDFLAGS +=
@@ -798,7 +844,7 @@ SHARED_CFLAGS =
 # while it is the default, it might silently get disabled if a symbol
 # gets manually exported (eg, because a header of a library we include
 # exports a symbol by mistake).
-ifneq ($(CC),clang)
+ifneq ($(CLANG_CC), yes)
 SHARED_LIB_LINK_CMD     = \
         $(LD) $(SHARED_LD_PREFLAGS) -shared \
         -Wl,--enable-auto-image-base \
@@ -835,9 +881,9 @@ SHARED_LIBEXT    = .dll.a
 DLL_LIBEXT	 = .dll
 #SHARED_CFLAGS	 += 
 
-ifneq ($(CC),clang)
+ifneq ($(CLANG_CC), yes)
 OBJ_MERGE_CMD = \
-  $(LD) -nostdlib $(OBJ_MERGE_CMD_FLAG) $(ALL_LDFLAGS) -o $(GNUSTEP_OBJ_DIR)/$(SUBPROJECT_PRODUCT) $^ ;
+  $(LD) -nostdlib $(OBJ_MERGE_CMD_FLAG) $(CORE_LDFLAGS) -o $(GNUSTEP_OBJ_DIR)/$(SUBPROJECT_PRODUCT) $^ ;
 else
 OBJ_MERGE_CMD = \
   ar cr $(GNUSTEP_OBJ_DIR)/$(SUBPROJECT_PRODUCT) $^ ;
@@ -846,7 +892,7 @@ endif
 HAVE_BUNDLES   = yes
 BUNDLE_LD      = $(LD)
 
-ifeq ($(CC),clang)
+ifeq ($(CLANG_CC), yes)
 BUNDLE_LDFLAGS += -shared -Wl,--export-all-symbols \
 	-Wl,--enable-auto-import \
         -Wl,--enable-auto-image-base \
@@ -864,111 +910,18 @@ endif
 ADDITIONAL_LDFLAGS += -Wl,--enable-auto-import
 ADDITIONAL_FLAGS += -fno-omit-frame-pointer
 
-# On Mingw32, it looks like the class name symbols start with '___' rather 
-# than '__'
-EXTRACT_CLASS_NAMES_COMMAND = $(NM) -Pg $$object_file | sed -n -e '/^___objc_class_name_[A-Za-z0-9_.]* [^U]/ {s/^___objc_class_name_\([A-Za-z0-9_.]*\) [^U].*/\1/p;}'
+# On 32bit Mingw32, it looks like the class name symbols start with an extra
+# underscore.
+
+ifeq ($(findstring pc, $(GNUSTEP_TARGET_VENDOR)), pc) 
+EXTRACT_CLASS_NAMES_COMMAND = $(NM) -Pg $$object_file | sed -n -e '/^.__OBJC_CLASS_[A-Za-z0-9_.]* [^U]/ {s/^.__OBJC_CLASS_\([A-Za-z0-9_.]*\) [^U].*/\1/p;}' -e '/^___objc_class_name_[A-Za-z0-9_.]* [^U]/ {s/^___objc_class_name_\([A-Za-z0-9_.]*\) [^U].*/\1/p;}'
+else
+EXTRACT_CLASS_NAMES_COMMAND = $(NM) -Pg $$object_file | sed -n -e '/^._OBJC_CLASS_[A-Za-z0-9_.]* [^U]/ {s/^._OBJC_CLASS_\([A-Za-z0-9_.]*\) [^U].*/\1/p;}' -e '/^__objc_class_name_[A-Za-z0-9_.]* [^U]/ {s/^__objc_class_name_\([A-Za-z0-9_.]*\) [^U].*/\1/p;}'
+endif
 
 endif
 
 # end Mingw32
-#
-####################################################
-
-####################################################
-#
-# Mingw64
-#
-ifeq ($(findstring mingw64, $(GNUSTEP_TARGET_OS)), mingw64) 
-shared = yes
-HAVE_SHARED_LIBS = yes
-
-# There's some sort of gcc bug that -pthread doesn't work on windows
-# so we need to reset the variables which use it.
-INTERNAL_CFLAGS = 
-INTERNAL_OBJCFLAGS = 
-INTERNAL_LDFLAGS = 
-SHARED_CFLAGS = 
-
-# This command links the library, generates automatically the list of
-# symbols to export, creates the DLL (eg, obj/gnustep-base-1_13.dll)
-# and the import library (eg, obj/libgnustep-base.dll.a).  We pass
-# --export-all-symbols to make sure it is always used.  Otherwise,
-# while it is the default, it might silently get disabled if a symbol
-# gets manually exported (eg, because a header of a library we include
-# exports a symbol by mistake).
-ifneq ($(CC),clang)
-SHARED_LIB_LINK_CMD     = \
-        $(LD) $(SHARED_LD_PREFLAGS) -shared \
-        -Wl,--enable-auto-image-base \
-        -Wl,--export-all-symbols \
-        -Wl,--out-implib,$(LIB_LINK_OBJ_DIR)/$(LIB_LINK_VERSION_FILE) \
-           $(ALL_LDFLAGS) -o $(LIB_LINK_OBJ_DIR)/$(LIB_LINK_DLL_FILE) $^ \
-	   $(INTERNAL_LIBRARIES_DEPEND_UPON) \
-	   $(SHARED_LD_POSTFLAGS)
-else
-SHARED_LIB_LINK_CMD     = \
-        $(LD) $(SHARED_LD_PREFLAGS) -shared \
-        -Wl,--enable-auto-image-base \
-        -Wl,--export-all-symbols \
-        -Wl,--out-implib,$(LIB_LINK_OBJ_DIR)/$(LIB_LINK_VERSION_FILE) \
-	   -o $(LIB_LINK_OBJ_DIR)/$(LIB_LINK_DLL_FILE) \
-	   -Wl,--whole-archive $^ $(ALL_LDFLAGS) -Wl,--no-whole-archive \
-	   $(INTERNAL_LIBRARIES_DEPEND_UPON) \
-	   $(SHARED_LD_POSTFLAGS)
-endif
-
-AFTER_INSTALL_SHARED_LIB_CMD = 
-AFTER_INSTALL_SHARED_LIB_CHOWN =
-
-BUILD_DLL	 = yes
-LIBEXT	 	 = .a
-# Technically, in this Unix-inspired building system, a DLL is
-# composed of a .dll file which goes in the executable path and is the
-# one which is loaded at runtime, and a .dll.a file which goes in the
-# library path and which is linked into the application in order to
-# enable it use the .dll.  Anything in gnustep-make which is looking
-# for shared libs should detect / look for the .dll.a as that's what
-# we link applications against.
-SHARED_LIBEXT    = .dll.a
-DLL_LIBEXT	 = .dll
-#SHARED_CFLAGS	 += 
-
-ifneq ($(CC),clang)
-OBJ_MERGE_CMD = \
-  $(LD) -nostdlib $(OBJ_MERGE_CMD_FLAG) $(ALL_LDFLAGS) -o $(GNUSTEP_OBJ_DIR)/$(SUBPROJECT_PRODUCT) $^ ;
-else
-OBJ_MERGE_CMD = \
-  ar cr $(GNUSTEP_OBJ_DIR)/$(SUBPROJECT_PRODUCT) $^ ;
-endif
-
-HAVE_BUNDLES   = yes
-BUNDLE_LD      = $(LD)
-
-ifeq ($(CC),clang)
-BUNDLE_LDFLAGS += -shared -Wl,--export-all-symbols \
-	-Wl,--enable-auto-import \
-        -Wl,--enable-auto-image-base \
-	-Wl,--whole-archive
-BUNDLE_LIBFLAGS += -Wl,--no-whole-archive
-BUNDLE_LINK_CMD  = \
-        $(BUNDLE_LD) $(BUNDLE_LDFLAGS) $(ALL_LDFLAGS) \
-	-o $(LDOUT)$(BUNDLE_FILE) \
-	$(OBJ_FILES_TO_LINK) \
-	$(BUNDLE_LIBFLAGS) $(ALL_LIB_DIRS) $(BUNDLE_LIBS)
-else
-BUNDLE_LDFLAGS += -shared -Wl,--enable-auto-image-base
-endif
-
-ADDITIONAL_LDFLAGS += -Wl,--enable-auto-import
-ADDITIONAL_FLAGS += -fno-omit-frame-pointer
-
-# On Mingw64, it looks like the class name symbols start with '__' rather 
-# than '___' like Mingw32
-EXTRACT_CLASS_NAMES_COMMAND = $(NM) -Pg $$object_file | sed -n -e '/^__objc_class_name_[A-Za-z0-9_.]* [^U]/ {s/^__objc_class_name_\([A-Za-z0-9_.]*\) [^U].*/\1/p;}'
-
-endif
-
-# end Mingw64
 #
 ####################################################
 
@@ -1013,7 +966,7 @@ CYGWIN_LD_FLAGS = -Wl,--export-all-symbols -Wl,--enable-auto-import
 #SHARED_CFLAGS	 += 
 
 OBJ_MERGE_CMD = \
-	$(LD) -nostdlib $(OBJ_MERGE_CMD_FLAG) $(ALL_LDFLAGS) $(CYGWIN_LD_FLAGS) -o $(GNUSTEP_OBJ_DIR)/$(SUBPROJECT_PRODUCT) $^ ;
+	$(LD) -nostdlib $(OBJ_MERGE_CMD_FLAG) $(CORE_LDFLAGS) $(CYGWIN_LD_FLAGS) -o $(GNUSTEP_OBJ_DIR)/$(SUBPROJECT_PRODUCT) $^ ;
 
 HAVE_BUNDLES   = yes
 BUNDLE_LD      = $(LD)
@@ -1033,6 +986,60 @@ endif
 #
 ####################################################
 
+####################################################
+#
+# Windows MSVC
+#
+ifeq ($(GNUSTEP_TARGET_OS), windows)
+shared = yes
+HAVE_SHARED_LIBS = yes
+
+# This command links the library, generates the list of symbols to export from
+# the dllexport annotations, creates the DLL (eg, obj/gnustep-base-1_13.dll),
+# a PDB file (eg, obj/gnustep-base-1_13.pdb, requires -g flag), and the import
+# library (eg, obj/gnustep-base.lib).
+SHARED_LIB_LINK_CMD     = \
+	$(LD) $(SHARED_LD_PREFLAGS) -g -Wl,-dll \
+	-Wl,-implib:$(LIB_LINK_OBJ_DIR)/$(LIB_LINK_VERSION_FILE) \
+	-Wl,-pdb:$(LIB_LINK_OBJ_DIR)/$(LIB_LINK_PDB_FILE) \
+	$(ALL_LDFLAGS) -o $(LIB_LINK_OBJ_DIR)/$(LIB_LINK_DLL_FILE) $^ \
+	$(INTERNAL_LIBRARIES_DEPEND_UPON) \
+	$(SHARED_LD_POSTFLAGS)
+
+AFTER_INSTALL_SHARED_LIB_CMD =
+AFTER_INSTALL_SHARED_LIB_CHOWN =
+
+BUILD_DLL	 = yes
+LIBEXT	 	 = .lib
+SHARED_LIBEXT    = .lib
+DLL_LIBEXT	 = .dll
+DLL_PDBEXT	 = .pdb
+#SHARED_CFLAGS	 +=
+
+OBJ_MERGE_CMD = ar cr $(GNUSTEP_OBJ_DIR)/$(SUBPROJECT_PRODUCT) $^ ;
+
+HAVE_BUNDLES   = yes
+BUNDLE_LD      = $(LD)
+
+BUNDLE_LDFLAGS += -Wl,-dll
+BUNDLE_LINK_CMD  = \
+	$(BUNDLE_LD) $(BUNDLE_LDFLAGS) $(ALL_LDFLAGS) \
+	-o $(LDOUT)$(BUNDLE_FILE) \
+	$(OBJ_FILES_TO_LINK) \
+	$(BUNDLE_LIBFLAGS) $(ALL_LIB_DIRS) $(BUNDLE_LIBS)
+
+# On Windows MSVC, class name symbols start with '__'
+EXTRACT_CLASS_NAMES_COMMAND = $(NM) -Pg $$object_file | sed -n -e '/^._OBJC_CLASS_[A-Za-z0-9_.]* [^U]/ {s/^._OBJC_CLASS_\([A-Za-z0-9_.]*\) [^U].*/\1/p;}' -e '/^__objc_class_name_[A-Za-z0-9_.]* [^U]/ {s/^__objc_class_name_\([A-Za-z0-9_.]*\) [^U].*/\1/p;}'
+
+# Suppress Clang warning in Base when including "GNUstepBase/GSConfig.h":
+# #include resolved using non-portable Microsoft search rules as: ././GNUstepBase/GSConfig.h
+ADDITIONAL_FLAGS += -Wno-microsoft-include
+
+endif
+
+# end Windows MSVC
+#
+####################################################
 
 ####################################################
 #
@@ -1074,7 +1081,7 @@ AFTER_INSTALL_SHARED_LIB_CHOWN = \
 	chown $(CHOWN_TO) $(LIB_LINK_FILE))
 
 OBJ_MERGE_CMD		= \
-	$(LD) -nostdlib $(OBJ_MERGE_CMD_FLAG) $(ALL_LDFLAGS) -o $(GNUSTEP_OBJ_DIR)/$(SUBPROJECT_PRODUCT) $^ ;
+	$(LD) -nostdlib $(OBJ_MERGE_CMD_FLAG) $(CORE_LDFLAGS) -o $(GNUSTEP_OBJ_DIR)/$(SUBPROJECT_PRODUCT) $^ ;
 
 SHARED_CFLAGS     += -fpic -fPIC -std=gnu99
 SHARED_LIBEXT   = .so
@@ -1110,7 +1117,7 @@ SHARED_LIBEXT   = .so
 HAVE_BUNDLES    = yes
 BUNDLE_LD       = $(LD)
 #BUNDLE_LDFLAGS  += -shared -mimpure-text
-BUNDLE_LDFLAGS  += -nodefaultlibs -Xlinker -Wl,-r
+BUNDLE_LDFLAGS  += -nodefaultlibs -Xlinker -Wl,-r -no-pie
 endif
 
 # end Unixware
@@ -1134,7 +1141,7 @@ SHARED_LIB_LINK_CMD     = \
           $(LN_S) $(LIB_LINK_VERSION_FILE) $(LIB_LINK_FILE))
 
 OBJ_MERGE_CMD		= \
-	$(LD) -nostdlib $(OBJ_MERGE_CMD_FLAG) $(ALL_LDFLAGS) -o $(GNUSTEP_OBJ_DIR)/$(SUBPROJECT_PRODUCT) $^ ;
+	$(LD) -nostdlib $(OBJ_MERGE_CMD_FLAG) $(CORE_LDFLAGS) -o $(GNUSTEP_OBJ_DIR)/$(SUBPROJECT_PRODUCT) $^ ;
 
 ifeq ($(CC), cc)
 SHARED_CFLAGS   += +z
@@ -1195,7 +1202,7 @@ AFTER_INSTALL_SHARED_LIB_CHOWN = \
 	chown $(CHOWN_TO) $(LIB_LINK_FILE))
 
 OBJ_MERGE_CMD		= \
-	$(LD) -nostdlib $(OBJ_MERGE_CMD_FLAG) $(ALL_LDFLAGS) -o $(GNUSTEP_OBJ_DIR)/$(SUBPROJECT_PRODUCT) $^ ;
+	$(LD) -nostdlib $(OBJ_MERGE_CMD_FLAG) $(CORE_LDFLAGS) -o $(GNUSTEP_OBJ_DIR)/$(SUBPROJECT_PRODUCT) $^ ;
 
 SHARED_CFLAGS      += -fPIC
 SHARED_LIBEXT      =  .so
@@ -1203,7 +1210,7 @@ SHARED_LIBEXT      =  .so
 HAVE_BUNDLES       =  yes
 BUNDLE_LD	   =  $(LD)
 BUNDLE_LDFLAGS     += -shared
-ADDITIONAL_LDFLAGS += -rdynamic
+FINAL_LDFLAGS      = -rdynamic
 STATIC_LDFLAGS += -static
 endif
 #
@@ -1245,7 +1252,7 @@ AFTER_INSTALL_SHARED_LIB_CHOWN = \
 	chown $(CHOWN_TO) $(LIB_LINK_FILE))
 
 OBJ_MERGE_CMD		= \
-	$(LD) -nostdlib $(OBJ_MERGE_CMD_FLAG) $(ALL_LDFLAGS) -o $(GNUSTEP_OBJ_DIR)/$(SUBPROJECT_PRODUCT) $^ ;
+	$(LD) -nostdlib $(OBJ_MERGE_CMD_FLAG) $(CORE_LDFLAGS) -o $(GNUSTEP_OBJ_DIR)/$(SUBPROJECT_PRODUCT) $^ ;
 
 SHARED_CFLAGS      += -fPIC
 SHARED_LIBEXT      =  .so
@@ -1253,7 +1260,7 @@ SHARED_LIBEXT      =  .so
 HAVE_BUNDLES       =  yes
 BUNDLE_LD	   =  $(LD)
 BUNDLE_LDFLAGS     += -shared
-ADDITIONAL_LDFLAGS += -rdynamic
+FINAL_LDFLAGS      = -rdynamic
 STATIC_LDFLAGS += -static
 endif
 #

@@ -1,3 +1,292 @@
+2024-08-20  Wolfgang Lux  <wolfgang.lux@gmail.com>
+
+	* TestFramework/gnustep-tests.in: Only return plain files when
+	looking for test cases.
+
+2024-07-31  Richard Frith-Macdonald <rfm@gnu.org>
+
+	* TestFramework/gnustep-tests.in: Fix 'Failed build' detection in
+	Summary.sh by recording build failures in tests.sum and test.log
+
+2024-05-31  Yavor Doganov  <yavor@gnu.org>
+
+	* GNUmakefile.in (install): Remove $(srcdir) from GNUstep-reset.sh
+	since it is now a generated file.  Fixes out-of-tree builds where
+	builddir != srcdir.
+
+2024-05-26  Richard Frith-Macdonald <rfm@gnu.org>
+
+        * ANNOUNCE:
+	* NEWS:
+	* RELEASENOTES:
+	* Documentation/news.texi:
+	* Documentation/releasenotes.texi:
+	Update announcement and release notes for 2.9.2.
+	* Version: Bump version to 2.9.2.
+
+2024-02-14  Richard Frith-Macdonald <rfm@gnu.org>
+
+	* common.make:
+	* rules.make:
+	Rewrite 'javac -h' code because its usage turns out to be quite
+	different from that of the javah command it is supposed to replace.
+	Possibly the header generation and class file generation could/should
+	be combined in a single pass, but we can't readily do that without
+	breakign compatibility with older versions of java.
+
+2024-02-11  Richard Frith-Macdonald <rfm@gnu.org>
+
+	* Documentation/gnustep-make.texi:
+	* common.make:
+	* messages.make:
+	* rules.make:
+	* target.make:
+	Use 'javac -h' if 'javah' does not exist, since the separate tool was
+	removed after version 8.  Update comments to match the change.
+
+2023-12-12  Richard Frith-Macdonald <rfm@gnu.org>
+
+	* TestFramework/gnustep-tests.in: Exit if no bash available
+	* configure.ac: Require bash for test framework
+	* configure: Regenerate
+
+2023-12-05  Yavor Doganov  <yavor@gnu.org>
+
+	* Documentation/gnustep-make.texi: Fix PDF generation with
+	texinfo/7.1; reorder sectioning commands.
+	* Documentation/gnustep-filesystem.texi: Likewise.
+
+2022-02-06  Richard Frith-Macdonald <rfm@gnu.org>
+
+	* Instance/Documentation/texi.make: for index.html specify explicit
+	output file for texi2html (Debian Bug#1030387)
+
+2023-02-06  Riccard Mottola <rm@gnu.org>
+
+	* Master/source-distribution.make
+	Try to implement .dist-ignore support for git-dist: after archive,
+	export and recompress again by excluding .dist-ignore
+
+2022-12-28  Richard Frith-Macdonald <rfm@gnu.org>
+
+        * ANNOUNCE:
+	* NEWS:
+	* RELEASENOTES:
+	* Documentation/news.texi:
+	* Documentation/releasenotes.texi:
+	Update announcement and release notes for 2.9.1.
+	* Version: Bump version to 2.9.1.
+
+2022-12-05  Richard Frith-Macdonald <rfm@gnu.org>
+
+	* TestFramework/gnustep-tests.in: use the -a option to force grep
+	to treat log files as text rather than binary.  If treated as binary
+	it would not extract the information we need.
+	* TestFramework/Testing.h: fix uninitialised variable in the macro
+	to test for a regexp match.
+
+2022-03-01  Richard Frith-Macdonald <rfm@gnu.org>
+
+	* TestFramework/gnustep-tests.in:
+	When using TestInfo send stdout and stderr to /dev/null so that
+	thy don't interfere with the test output.
+
+2022-02-16  Richard Frith-Macdonald <rfm@gnu.org>
+
+	* TestFramework/gnustep-tests.in:
+	Fix bug introduced in rewrite for parallelisation: we were getting
+	immediate end of testing when one file failed, but that behavior
+	should only occur when --failfast is specified.
+
+2022-01-26  Richard Frith-Macdonald <rfm@gnu.org>
+
+	* TestFramework/README:
+	* TestFramework/TestInfo:
+	* TestFramework/gnustep-tests.in:
+	Add support for controlling test execution using SEQUENCE and PARALLEL
+	in TestInfo to control the order of seuntial tests and the running of
+	concurrent tests.
+
+2021-03-28  Frederik Seiffert <frederik@algoriddim.com>
+
+	* TestFramework/Testing.h:
+	Add workaround for Clang bug on Windows MSVC when tests contain no
+	Objective-C constructs.
+
+2021-03-21  Ivan Vucica <ivan@vucica.net>
+
+	* ANNOUNCE:
+	* NEWS:
+	* RELEASENOTES:
+	* Documentation/news.texi:
+	* Documentation/releasenotes.texi:
+	Update release notes for 2.9.0.
+	* Version:
+	Bump version to 2.9.0.
+
+2021-03-09  Frederik Seiffert <frederik@algoriddim.com>
+
+	* target.make:
+	Link against debug or release UCRT DLLs for Windows MSVC and remove
+	unused -pthread flag.
+	* configure:
+	* configure.ac:
+	Fix CFLAGS for Windows MSVC.
+
+2021-03-06  Richard Frith-Macdonald <rfm@gnu.org>
+
+	* Instance/application.make:
+	* configure:
+	* configure.ac:
+	* jni.make:
+	* rules.make:
+	* target.make:
+	Adopt the triplet used by the mingw-w64 project (where the OS is always
+	mingw32 and we differentiate 64bit Windows using the vendor part),
+	rather than the one returned by autoconf. Scrap most of the code to
+	differentiate between the two systems.
+
+2021-02-25  Richard Frith-Macdonald <rfm@gnu.org>
+
+	* configure:
+	* configure.ac:
+	Convert mingw-w64's triplet (cpu-w64-mingw32) which looks like mingw32
+	back to standard form.
+
+
+2021-02-12  Frederik Seiffert <frederik@algoriddim.com>
+
+	* common.make: Silence PATH warning on Windows MSVC.
+	* config-noarch.make.in: Add workaround for GNUSTEP_MAKEFILES
+	breaking when using Windows-native "make".
+
+2021-01-29  Frederik Seiffert <frederik@algoriddim.com>
+
+	* common.make:
+	* configure:
+	* m4/gs_cc_is_clang.m4:
+	* target.make:
+	Added support for building on Windows with Clang MSVC target.
+	Requires passing a host like --host=x86_64-pc-windows.
+	Removes the check for $GCC in gs_cc_is_clang.m4 as it will be false
+	when using the MSVC ABI due to __GNUC__ not being defined.
+
+2021-01-29  Frederik Seiffert <frederik@algoriddim.com>
+
+	* common.make:
+	* target.make:
+	Check $CLANG_CC instead of comparing $CC with "clang". Fixes checks
+	when $CC is set to something like /path/to/clang.
+
+2021-01-29  Frederik Seiffert <frederik@algoriddim.com>
+
+	* Instance/rules.make:
+	* Instance/subproject.make:
+	* common.make:
+	Link subproject object files directly. Instead of merging all
+	subproject object files into subproject.o, we now create
+	subproject.txt containing a list of all object files, and use these
+	directly in SUBPROJECT_OBJ_FILES.
+	This enables building on platforms like Windows MSVC where `ld -r` is
+	not supported, and generally avoids issues with incremental linking
+	that have historically existed in some linker versions.
+
+2021-01-18  Fred Kiefer <FredKiefer@gmx.de>
+
+	* Documentation/news.texi: Update for upcoming release.
+
+2020-11-26  Frederik Seiffert <frederik@algoriddim.com>
+
+	* configure
+	* configure.ac:
+	Check for objc.dll to support libobjc2 on Windows.
+
+2020-11-26  Frederik Seiffert <frederik@algoriddim.com>
+
+	* configure
+	* configure.ac:
+	Enable checking for native Objective-C exception support on Windows
+	if non-gnu runtime is used (i.e. ng runtime).
+
+2020-11-14  Richard Frith-Macdonald <rfm@gnu.org>
+
+	* rules.make:
+	* target.make:
+	New variables FINAL_LDFLAGS and CORE_LDFLAGS such that ALL_LDFLAGS is
+	now a combination of the two, and is used for final linking of an
+	executable re shared library/bundle, while CORE_LDFLAGS is used when
+	performing a partial link in a subproject.
+
+2020-10-31  Yavor Doganov  <yavor@gnu.org>
+
+	* Instance/Documentation/texi.make: Honor @setfilename.
+
+2020-08-30  Ladislav Michl <ladis@linux-mips.org>
+
+	* configure.ac: Increase AC version number and use OBJCXX directly.
+	* configure: Regenerate.
+
+2020-07-09  Wolfgang Lux  <wolfgang.lux@gmail.com>
+
+	* rules.make: Fix variable name to make compiling for ARC actually
+	work.
+
+2020-06-07 Fred Kiefer <FredKiefer@gmx.de>
+
+	* gs_gcc_version.m4: Add -dumpfullversion to the version
+	extraction. Versions of gcc > 7.0 require this parameter to output
+	the full version number. Older versions should just ignore this option.
+	* configure: Regenerate
+
+2020-04-14  Yavor Doganov  <yavor@gnu.org>
+
+	* config-precomp-test/run-test.sh: Put $LIBS at the end so that it
+	works with GCC >= 9 (which implies -Wl,--as-needed).
+
+2020-04-13  Ivan Vucica <ivan@vucica.net>
+
+	* Documentation/announce.texi:
+	* ANNOUNCE:
+	Normalize the accompanying text for the release announcement across
+	core packages: standardize chapter name and GPG information.
+
+2020-04-05  Ivan Vucica <ivan@vucica.net>
+
+	* ANNOUNCE:
+	* NEWS:
+	* RELEASENOTES:
+	* Documentation/news.texi:
+	* Documentation/releasenotes.texi:
+	Update release notes for 2.8.0.
+	* Version:
+	Bump version to 2.8.0.
+
+
+2020-02-28  Patryk Laurent <plaurent@me.com>
+
+	* target.make: Unified cross-OS class name extraction and unified
+	for other OSes (Darwin, OpenBSD, MinGW).
+
+2020-02-22  Patryk Laurent <plaurent@me.com>
+
+	* target.make: Improved detection of runtime version. Fixed class
+	name extraction for Darwin, OpenBSD and MinGW32/64.
+
+2020-02-18  Patryk Laurent <plaurent@me.com>
+
+	* target.make: Fixed EXTRACT_CLASS_NAMES_COMMAND for runtime v2.
+
+2020-02-17  Richard Frith-Macdonald <rfm@gnu.org>
+
+	* library-combo.make: removed GS_WITH_ARC support
+	* rules.make: added GS_WITH_ARC stuff
+	* Documentation/gnustep-make.texi: Document the changes ...
+	We can define GS_WITH_ARC more freely (it is no longer necessary to
+	define it before common.make).  The default compiler flags for ARC
+	support now include -fobjc-arc-exceptions.  We can now define
+	ARC_CPPFLAGS and ARC_OBJCFLAGS to overide the flags sent to the
+	preprocessor and compiler/linker when ARC is enabled using GS_WITH_ARC
+
 2019-10-29  Wolfgang Lux  <wolfgang.lux@gmail.com>
 
 	* GNUmakefile.in:
@@ -362,14 +651,14 @@ to specify the files to install.
 	we refrain from attempting tests in a directory whose startup script
 	has failed.
 
-2014-12-21: Niels Grewe <niels.grewe@halbordnung.de>
+2014-12-21 Niels Grewe <niels.grewe@halbordnung.de>
 
 	* rules.make
 	* Instance/Shared/java.make:
 	Add as_jar option to install the jar file instead of the expanded
 	class hierarchy.
 
-2014-12-21: Niels Grewe <niels.grewe@halbordnung.de>
+2014-12-21 Niels Grewe <niels.grewe@halbordnung.de>
 
 	* Instance/Shared/java.make
 	* Instance/java.make

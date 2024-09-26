@@ -1,6 +1,6 @@
 /* Testing - Include basic tests macros for the GNUstep Testsuite
 
-   Copyright (C) 2005-2011 Free Software Foundation, Inc.
+   Copyright (C) 2005-2021 Free Software Foundation, Inc.
 
    Written by: Alexander Malmberg <alexander@malmberg.org>
    Updated by: Richard Frith-Macdonald <rfm@gnu.org>
@@ -26,12 +26,27 @@
 #include <string.h>
 
 #import <Foundation/NSAutoreleasePool.h>
-#import <Foundation/NSDate.h>
+#import <Foundation/NSCalendarDate.h>
 #import <Foundation/NSException.h>
 #import <Foundation/NSObjCRuntime.h>
 #import <Foundation/NSObject.h>
 #import <Foundation/NSRegularExpression.h>
 #import <Foundation/NSString.h>
+
+#if defined(__OBJC__) && defined(__clang__) && defined(_MSC_VER)
+/* Work around Clang bug on Windows MSVC when tests contain no
+ * Objective-C constructs: https://bugs.llvm.org/show_bug.cgi?id=49681
+ */
+id __work_around_clang_bug = @"__unused__";
+#endif
+
+/* strncpy is deprecated on Windows MSVC. Use strncpy_s instead.
+ */
+#if defined(_MSC_VER)
+    #define STRNCPY(dest, size_dest, src, size_src) strncpy_s(dest, size_dest, src, size_src);
+#else
+    #define STRNCPY(dest, size_dest, src, size_src) strncpy(dest, src, size_dest);
+#endif
 
 /* A flag indicating that the testsuite is currently processing tests
  * which are actually not expected to pass, but where we hope someone
@@ -56,6 +71,15 @@ static BOOL testPassed __attribute__((unused)) = NO;
  * Do not modify this directly.
  */
 static unsigned testLineNumber __attribute__((unused)) = 0;
+
+/* A flag indicating whether timestamps should be produced in the output
+ * for each testcase.  By default it is set to TEST_TS if defined, but
+ * test code may override that default.
+ */
+#if     !defined(TEST_TS)
+#define TEST_TS  0
+#endif
+static BOOL testTimestamps __attribute__((unused)) = TEST_TS;
 
 /* A variable storing the indentation of the set currently being run.
  * Do not modify this directly.
@@ -104,7 +128,11 @@ static void (*setEnded)(const char *name, BOOL completed, double duration)
  * The global variable 'testHopeful' can be set to a non-zero value before
  * calling this function in order to specify that if the condition is
  * not true it should be treated as a dashed hope rather than a failure
- * (unless the tests are bing performed in 'developer' mode).
+ * (unless the tests are being performed in 'developer' mode).
+ *
+ * The global variable 'testTimestamps' can be set to a non-zero value before
+ * calling this function in order to specify that the output logged is to
+ * include the timestamp of the testcase completion (entry into this function).
  *
  * If there is a better higher-level test macro available, please use
  * that instead.  In particular, please use the PASS_EQUAL() macro wherever
@@ -124,22 +152,30 @@ static void pass(int passed, const char *format, ...)
 {
   va_list args;
   va_start(args, format);
+  const char *ts = "";
 
+  if (testTimestamps)
+    {
+      NSCalendarDate    *d = [NSCalendarDate date];
+
+      [d setCalendarFormat: @"(%Y-%m-%d %H:%M:%S.%F %z) "];
+      ts = [[d description] cString];
+    }
   if (passed)
     {
-      fprintf(stderr, "Passed test:     ");
+      fprintf(stderr, "Passed test:     %s", ts);
       testPassed = YES;
     }
 #if	!defined(TESTDEV)
   else if (YES == testHopeful)
     {
-      fprintf(stderr, "Dashed hope:     ");
+      fprintf(stderr, "Dashed hope:     %s", ts);
       testPassed = NO;
     }
 #endif
   else
     {
-      fprintf(stderr, "Failed test:     ");
+      fprintf(stderr, "Failed test:     %s", ts);
       testPassed = NO;
     }
   testIndent();
@@ -304,18 +340,15 @@ static void testStart()
       _pat = (id)(testExpect__);\
       _exp = [[[NSRegularExpression alloc] initWithPattern: _pat \
         options: 0 error: 0] autorelease];\
+      _cond = 0; \
       if (nil != _dsc && nil != _exp) \
         { \
           NSRange       r = NSMakeRange(0, [_dsc length]);\
           r = [_exp rangeOfFirstMatchInString: _dsc options: 0 range: r];\
           if (r.length > 0)\
             { \
-              _cond = YES; \
+              _cond = 1; \
             } \
-        } \
-      else \
-        { \
-          _cond = NO; \
         } \
       pass(_cond, "%s:%d ... " testFormat__, __FILE__, \
         __LINE__, ## __VA_ARGS__); \
@@ -445,8 +478,9 @@ static void testStart()
     BOOL _save_hopeful = testHopeful; \
     unsigned _save_indentation = testIndentation; \
     int	_save_line = __LINE__; \
-    char *_save_set = (char*)malloc(strlen(setName) + 1); \
-    strncpy(_save_set, setName, strlen(setName) + 1); \
+    size_t _save_set_size = strlen(setName) + 1; \
+    char *_save_set = (char*)malloc(_save_set_size); \
+    STRNCPY(_save_set, _save_set_size, setName, _save_set_size); \
     fprintf(stderr, "Start set:       "); \
     testIndent(); \
     fprintf(stderr, "%s:%d ... %s\n", __FILE__, __LINE__, _save_set); \
@@ -564,7 +598,8 @@ static void testStart()
 /* some good macros to compare floating point numbers */
 #import <math.h>
 #import <float.h>
-#define EQ(x, y) (fabs((x) - (y)) <= fabs((x) + (y)) * (FLT_EPSILON * 100))
+#define EQ(x, y) \
+  (((x) >= ((y) - FLT_EPSILON*100)) && ((x) <= ((y) + FLT_EPSILON*100)))
 #define LE(x, y) ((x)<(y) || EQ(x, y))
 #define GE(x, y) ((y)<(x) || EQ(x, y))
 #define LT(x, y) (!GE(x, y))
